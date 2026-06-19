@@ -1,0 +1,555 @@
+import os
+import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from travel_planner.llm import generate_plan_v2
+from travel_planner.models import TripContext
+
+st.set_page_config(page_title="India Travel Planner", page_icon="✈️", layout="wide")
+
+# ── Global CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
+html, body, [class*="css"] { font-family: 'Poppins', sans-serif; }
+
+.hero {
+    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+    border-radius: 24px; padding: 4rem 2rem;
+    text-align: center; margin-bottom: 2rem; color: white;
+}
+.hero h1 {
+    font-size: 3.2rem; font-weight: 800; margin: 0;
+    background: linear-gradient(90deg, #f7971e, #ffd200);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.hero p { font-size: 1.15rem; color: rgba(255,255,255,0.75); margin: 0.6rem 0 0; }
+
+[data-testid="stForm"] {
+    background: white; border-radius: 20px;
+    padding: 1rem 2rem 2rem; box-shadow: 0 20px 60px rgba(0,0,0,0.08);
+}
+[data-testid="stFormSubmitButton"] > button {
+    background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%) !important;
+    color: #1a1a2e !important; border: none !important;
+    font-size: 1.1rem !important; font-weight: 700 !important;
+    border-radius: 50px !important; padding: 0.85rem 2rem !important;
+    box-shadow: 0 8px 25px rgba(247,151,30,0.4) !important;
+    transition: all 0.3s !important; width: 100% !important;
+}
+[data-testid="stFormSubmitButton"] > button:hover {
+    transform: translateY(-3px) !important;
+    box-shadow: 0 14px 35px rgba(247,151,30,0.5) !important;
+}
+
+.stat-card {
+    border-radius: 16px; padding: 1.2rem 1rem;
+    color: white; text-align: center; margin-bottom: 0.5rem;
+}
+.stat-card .icon { font-size: 1.6rem; }
+.stat-card .label { font-size: 0.75rem; opacity: 0.8; margin: 2px 0; }
+.stat-card .value { font-size: 1.1rem; font-weight: 700; }
+
+.section-title {
+    font-size: 1.5rem; font-weight: 700; color: #1a1a2e;
+    margin: 2.5rem 0 1.2rem; padding-bottom: 0.4rem;
+    border-bottom: 3px solid #f7971e; display: inline-block;
+}
+
+/* Destination card */
+.dest-card {
+    background: white; border-radius: 16px; padding: 1.4rem;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.07);
+    border-top: 4px solid #f7971e; margin-bottom: 0.5rem;
+}
+.dest-card h3 { margin: 0 0 2px; color: #1a1a2e; font-size: 1.15rem; }
+.dest-card .tagline { color: #764ba2; font-size: 0.85rem; margin: 0 0 10px; font-weight: 600; }
+.dest-card .desc { color: #444; font-size: 0.88rem; line-height: 1.6; margin-bottom: 10px; }
+.dest-card .history-block {
+    background: #fdf6e3; border-left: 3px solid #f7971e;
+    padding: 8px 12px; border-radius: 0 8px 8px 0;
+    font-size: 0.83rem; color: #555; margin-bottom: 10px; font-style: italic;
+}
+.fact-tag {
+    background: #eef2ff; color: #4338ca; border-radius: 20px;
+    padding: 3px 10px; font-size: 0.75rem; font-weight: 500;
+    display: inline-block; margin: 2px 2px 0 0;
+}
+.activity-tag {
+    background: #ecfdf5; color: #065f46; border-radius: 20px;
+    padding: 3px 10px; font-size: 0.75rem; font-weight: 500;
+    display: inline-block; margin: 2px 2px 0 0;
+}
+.highlight-tag {
+    background: #f3eeff; color: #5b21b6; border-radius: 20px;
+    padding: 3px 10px; font-size: 0.75rem; font-weight: 500;
+    display: inline-block; margin: 2px 2px 0 0;
+}
+
+/* Day card */
+.day-card {
+    background: white; border-radius: 16px; padding: 1.4rem 1.6rem;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.06);
+    border-left: 5px solid #667eea; margin-bottom: 1rem;
+}
+.day-badge {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white; border-radius: 20px; padding: 3px 14px;
+    font-size: 0.78rem; font-weight: 600; display: inline-block; margin-bottom: 6px;
+}
+.day-card h4 { margin: 4px 0 2px; color: #1a1a2e; font-size: 1.05rem; }
+.day-card .day-loc { color: #888; font-size: 0.82rem; margin-bottom: 10px; }
+.fun-highlight {
+    background: linear-gradient(135deg, #ffecd2, #fcb69f);
+    border-radius: 10px; padding: 8px 14px;
+    font-size: 0.85rem; color: #7b341e; font-weight: 600; margin-bottom: 12px;
+}
+.time-section { margin: 8px 0; }
+.time-label {
+    font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; margin-bottom: 3px;
+}
+.time-content { font-size: 0.88rem; color: #444; line-height: 1.55; }
+.stay-line { color: #667eea; font-size: 0.82rem; margin-top: 12px; font-weight: 500; }
+
+/* Hotel card */
+.hotel-card {
+    background: white; border-radius: 16px; padding: 1.2rem;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.06);
+    border-top: 4px solid #4facfe; margin-bottom: 0.5rem;
+}
+.hotel-card h4 { margin: 0 0 4px; color: #1a1a2e; font-size: 1rem; }
+.hotel-card .hotel-meta { color: #888; font-size: 0.82rem; margin-bottom: 4px; }
+.hotel-card .hotel-price { font-size: 1.3rem; font-weight: 700; color: #4facfe; }
+.hotel-card .hotel-price span { font-size: 0.75rem; font-weight: 400; color: #aaa; }
+.hotel-card .why-pick { font-size: 0.82rem; color: #555; margin-top: 6px; font-style: italic; }
+
+.transport-card {
+    background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+    border-radius: 16px; padding: 1.3rem 1.5rem;
+    color: #333; font-size: 0.9rem; line-height: 1.6;
+}
+
+.budget-bar-outer { background: #f0f0f0; border-radius: 10px; height: 10px; overflow: hidden; margin: 4px 0 10px; }
+.budget-bar-inner { height: 100%; border-radius: 10px; }
+.budget-row { display: flex; justify-content: space-between; font-size: 0.88rem; font-weight: 500; color: #333; margin-top: 6px; }
+.budget-total-card {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border-radius: 16px; padding: 1.2rem 1.5rem;
+    color: white; text-align: right; margin-top: 1rem;
+}
+.budget-total-card .t-label { font-size: 0.82rem; opacity: 0.8; }
+.budget-total-card .t-value { font-size: 2rem; font-weight: 800; }
+.budget-total-card .t-note { font-size: 0.78rem; opacity: 0.7; }
+
+.tip-item {
+    background: linear-gradient(135deg, #ffecd2, #fcb69f);
+    border-radius: 12px; padding: 0.8rem 1.2rem;
+    margin-bottom: 0.6rem; color: #7b341e; font-size: 0.88rem;
+}
+
+[data-testid="stImage"] img {
+    border-radius: 12px; transition: transform 0.3s ease;
+}
+[data-testid="stImage"] img:hover { transform: scale(1.02); }
+
+.stButton > button {
+    background: linear-gradient(135deg, #667eea, #764ba2) !important;
+    color: white !important; border: none !important;
+    border-radius: 50px !important; font-weight: 600 !important;
+    padding: 0.75rem 2rem !important; transition: all 0.3s !important;
+    box-shadow: 0 6px 20px rgba(102,126,234,0.4) !important;
+}
+.stButton > button:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 10px 28px rgba(102,126,234,0.5) !important;
+}
+
+.search-anim { text-align: center; padding: 2.5rem 0 1rem; color: #1a1a2e; }
+.search-anim .big-icon { font-size: 4rem; animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse {
+    0%,100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.7; }
+}
+.search-step {
+    background: white; border-radius: 12px; padding: 0.65rem 1.2rem;
+    margin: 0.3rem 0; color: #555; font-size: 0.88rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ── Session state ─────────────────────────────────────────────────────────────
+for key, default in [
+    ("page", "form"), ("plan", None), ("plan_text", None),
+    ("all_images", []), ("by_dest", {}), ("trip_context", None),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+
+# ── FORM PAGE ─────────────────────────────────────────────────────────────────
+def show_form():
+    st.markdown("""
+    <div class="hero">
+        <h1>✈️ India Travel Planner</h1>
+        <p>From royal Rajasthan to pristine Kerala — discover your perfect Indian adventure</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    months = ["January","February","March","April","May","June",
+              "July","August","September","October","November","December"]
+
+    with st.form("trip_form"):
+        st.markdown("#### Where & When")
+        c1, c2 = st.columns(2)
+        with c1:
+            destination = st.text_input(
+                "🗺️ Destination",
+                placeholder="Rajasthan, Goa, Kerala… (leave blank for suggestions)",
+            )
+        with c2:
+            from_city = st.text_input("🏠 Departing from *", placeholder="Mumbai, Delhi, Bangalore…")
+
+        c3, c4, c5 = st.columns(3)
+        with c3:
+            travel_month = st.selectbox("📅 Travel month *", months, index=9)
+        with c4:
+            duration = st.number_input("⏱️ Duration (days) *", min_value=1, max_value=30, value=7)
+        with c5:
+            num_travelers = st.number_input("👥 Travelers *", min_value=1, max_value=20, value=2)
+
+        st.markdown("#### Who's Coming")
+        c6, c7 = st.columns([2, 1])
+        with c6:
+            traveler_type = st.radio("Traveler type *", ["solo", "couple", "family", "friends"], horizontal=True)
+        with c7:
+            has_kids = st.checkbox("👧 Traveling with kids")
+
+        st.markdown("#### Budget & Vibe")
+        budget = st.slider("💰 Total budget (₹)", min_value=5000, max_value=300000, value=50000, step=5000)
+        st.caption(f"Selected: ₹{budget:,}")
+
+        experience = st.multiselect(
+            "🎭 What kind of experience?",
+            ["nature", "heritage", "adventure", "beach", "religious", "offbeat"],
+            default=["heritage", "nature"],
+        )
+
+        submitted = st.form_submit_button("🔍  Find My Perfect Trip", use_container_width=True)
+
+    if submitted:
+        if not from_city.strip():
+            st.error("Please enter your departure city.")
+            return
+        st.session_state.trip_context = TripContext(
+            destination=destination.strip() or None,
+            starting_city=from_city.strip(),
+            travel_month=travel_month,
+            duration_days=int(duration),
+            num_travelers=int(num_travelers),
+            budget_total=int(budget),
+            traveler_type=traveler_type,
+            has_kids=has_kids,
+            experience_type=experience,
+            is_confirmed=True,
+        )
+        st.session_state.page = "searching"
+        st.rerun()
+
+
+# ── SEARCHING PAGE ────────────────────────────────────────────────────────────
+def show_searching():
+    ctx: TripContext = st.session_state.trip_context
+    phase = "planning" if ctx.destination else "suggestion"
+    dest_label = ctx.destination or "the perfect destination for you"
+
+    st.markdown(f"""
+    <div class="search-anim">
+        <div class="big-icon">🔍</div>
+        <h2>Planning your trip to {dest_label}…</h2>
+        <p style="color:#666; font-size:0.95rem;">Searching travel guides, hotels, and hidden gems</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    progress = st.progress(0)
+    steps_box = st.container()
+    img_preview = st.empty()
+
+    all_images: list = []
+    by_dest: dict = {}
+    plan_data = None
+    plan_text = None
+    step = 0
+
+    for event in generate_plan_v2(ctx, phase):
+        if event["type"] == "searching":
+            step += 1
+            progress.progress(min(step / 14, 0.95))
+            with steps_box:
+                st.markdown(f'<div class="search-step">🔍 {event["query"]}</div>', unsafe_allow_html=True)
+
+        elif event["type"] == "plan":
+            plan_data = event["data"]
+            plan_text = event["text"]
+
+        elif event["type"] == "images":
+            all_images = event["all"]
+            by_dest = event["by_dest"]
+            if all_images:
+                img_preview.image(all_images[:4], width=180)
+
+    progress.progress(1.0)
+    st.session_state.plan = plan_data
+    st.session_state.plan_text = plan_text
+    st.session_state.all_images = all_images
+    st.session_state.by_dest = by_dest
+    st.session_state.page = "results"
+    st.rerun()
+
+
+# ── RESULTS PAGE ──────────────────────────────────────────────────────────────
+def show_results():
+    plan = st.session_state.plan
+    plan_text = st.session_state.plan_text
+    images: list = st.session_state.all_images
+    by_dest: dict = st.session_state.by_dest
+    ctx: TripContext = st.session_state.trip_context
+
+    if plan is None and plan_text is None:
+        st.error("Could not generate a plan. Please try again.")
+        if st.button("← Back to form"):
+            st.session_state.page = "form"
+            st.rerun()
+        return
+
+    # ── Hero image ────────────────────────────────────────────────────────────
+    if images:
+        st.image(images[0], use_container_width=True)
+
+    # ── Title & overview ──────────────────────────────────────────────────────
+    title = plan.get("trip_title", "Your India Adventure") if plan else "Your India Trip"
+    overview = plan.get("overview", "") if plan else ""
+
+    st.markdown(f"""
+    <div style="text-align:center; padding:1.5rem 0 0.5rem;">
+        <h1 style="font-size:2.4rem; font-weight:800; color:#1a1a2e; margin:0;">{title}</h1>
+        <p style="font-size:1rem; color:#555; max-width:700px; margin:0.7rem auto 0; line-height:1.65;">{overview}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Stat cards ────────────────────────────────────────────────────────────
+    s1, s2, s3, s4 = st.columns(4)
+    for col, (icon, label, val), grad, tc in zip(
+        [s1, s2, s3, s4],
+        [("📍","From",ctx.starting_city),("⏱️","Duration",f"{ctx.duration_days} days"),
+         ("👥","Travelers",f"{ctx.num_travelers} ({ctx.traveler_type})"),("💰","Budget",f"₹{ctx.budget_total:,}")],
+        ["linear-gradient(135deg,#667eea,#764ba2)","linear-gradient(135deg,#f7971e,#ffd200)",
+         "linear-gradient(135deg,#4facfe,#00f2fe)","linear-gradient(135deg,#43e97b,#38f9d7)"],
+        ["white","#1a1a2e","white","#1a1a2e"],
+    ):
+        with col:
+            st.markdown(f'<div class="stat-card" style="background:{grad}; color:{tc};"><div class="icon">{icon}</div><div class="label">{label}</div><div class="value">{val}</div></div>', unsafe_allow_html=True)
+
+    if plan is None:
+        # Fallback — still show images then the text content
+        if images:
+            st.markdown('<div class="section-title">📸 Trip Photos</div>', unsafe_allow_html=True)
+            gcols = st.columns(4)
+            for i, url in enumerate(images[:8]):
+                with gcols[i % 4]:
+                    st.image(url, use_container_width=True)
+        st.markdown('<div class="section-title">📋 Your Travel Plan</div>', unsafe_allow_html=True)
+        st.markdown(plan_text)
+    else:
+        # ── Destinations ──────────────────────────────────────────────────────
+        destinations = plan.get("destinations", [])
+        if destinations:
+            st.markdown('<div class="section-title">📍 Places You\'ll Explore</div>', unsafe_allow_html=True)
+            dcols = st.columns(min(len(destinations), 3))
+
+            # Build a flat image pool per destination
+            img_pool_flat = [img for imgs in by_dest.values() for img in imgs]
+            if not img_pool_flat:
+                img_pool_flat = images
+
+            for i, dest in enumerate(destinations[:3]):
+                dest_name = dest.get("name", "")
+                dest_imgs = by_dest.get(dest_name, img_pool_flat[i*3:(i+1)*3])
+
+                with dcols[i]:
+                    if dest_imgs:
+                        st.image(dest_imgs[0], use_container_width=True)
+
+                    history_html = ""
+                    if dest.get("history"):
+                        history_html = f'<div class="history-block">📜 {dest["history"]}</div>'
+
+                    facts_html = "".join(
+                        f'<span class="fact-tag">⚡ {f}</span>'
+                        for f in dest.get("unique_facts", [])[:3]
+                    )
+                    activities_html = "".join(
+                        f'<span class="activity-tag">🎯 {a}</span>'
+                        for a in dest.get("fun_activities", [])[:4]
+                    )
+                    highlights_html = "".join(
+                        f'<span class="highlight-tag">✦ {h}</span>'
+                        for h in dest.get("highlights", [])[:4]
+                    )
+                    cost_html = (f'<p style="color:#43e97b; font-weight:600; font-size:0.85rem; margin:8px 0 0;">💰 {dest["estimated_cost"]}</p>'
+                                 if dest.get("estimated_cost") else "")
+
+                    st.markdown(f"""
+                    <div class="dest-card">
+                        <h3>{dest_name}</h3>
+                        <p class="tagline">{dest.get("tagline","")}</p>
+                        <p class="desc">{dest.get("description","")}</p>
+                        {history_html}
+                        <div style="margin-bottom:6px;">{facts_html}</div>
+                        <div style="margin-bottom:6px;">{activities_html}</div>
+                        <div>{highlights_html}</div>
+                        {cost_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # Show extra destination images as a small gallery
+                    if len(dest_imgs) > 1:
+                        extra_cols = st.columns(len(dest_imgs[1:4]))
+                        for j, extra_img in enumerate(dest_imgs[1:4]):
+                            with extra_cols[j]:
+                                st.image(extra_img, use_container_width=True)
+
+        # ── Photo gallery ─────────────────────────────────────────────────────
+        gallery = [img for img in images if img not in [by_dest.get(d.get("name",""), [None])[0] for d in destinations]]
+        if len(gallery) >= 4:
+            st.markdown('<div class="section-title">📸 More from the Trip</div>', unsafe_allow_html=True)
+            gcols = st.columns(4)
+            for i, url in enumerate(gallery[:8]):
+                with gcols[i % 4]:
+                    st.image(url, use_container_width=True)
+
+        # ── Itinerary ─────────────────────────────────────────────────────────
+        itinerary = plan.get("itinerary", [])
+        if itinerary:
+            st.markdown('<div class="section-title">📅 Day-by-Day Itinerary</div>', unsafe_allow_html=True)
+
+            for day in itinerary:
+                fun_highlight = day.get("fun_highlight", "")
+                fh_html = (f'<div class="fun-highlight">⭐ {fun_highlight}</div>' if fun_highlight else "")
+
+                morning = day.get("morning", "")
+                afternoon = day.get("afternoon", "")
+                evening = day.get("evening", "")
+                # Fallback: old-style activities list
+                activities = day.get("activities", [])
+
+                if morning or afternoon or evening:
+                    time_html = ""
+                    if morning:
+                        time_html += f'<div class="time-section"><div class="time-label" style="color:#f7971e;">🌅 Morning</div><div class="time-content">{morning}</div></div>'
+                    if afternoon:
+                        time_html += f'<div class="time-section"><div class="time-label" style="color:#4facfe;">☀️ Afternoon</div><div class="time-content">{afternoon}</div></div>'
+                    if evening:
+                        time_html += f'<div class="time-section"><div class="time-label" style="color:#764ba2;">🌙 Evening</div><div class="time-content">{evening}</div></div>'
+                else:
+                    acts_html = "".join(f"<li>{a}</li>" for a in activities)
+                    time_html = f'<ul style="color:#444; font-size:0.88rem; padding-left:18px; margin:0;">{acts_html}</ul>'
+
+                stay_html = (f'<p class="stay-line">🏨 Tonight: {day["stay"]}</p>' if day.get("stay") else "")
+
+                st.markdown(f"""
+                <div class="day-card">
+                    <span class="day-badge">Day {day.get("day","")}</span>
+                    <h4>{day.get("title","")}</h4>
+                    <p class="day-loc">📍 {day.get("location","")}</p>
+                    {fh_html}
+                    {time_html}
+                    {stay_html}
+                </div>
+                """, unsafe_allow_html=True)
+
+        # ── Hotels ────────────────────────────────────────────────────────────
+        hotels = plan.get("hotels", [])
+        if hotels:
+            st.markdown('<div class="section-title">🏨 Where to Stay</div>', unsafe_allow_html=True)
+            hcols = st.columns(min(len(hotels), 3))
+            # Use tail of images pool for hotels to avoid repeating destination hero images
+            hotel_imgs = images[-(len(hotels) * 2):]
+
+            for i, hotel in enumerate(hotels[:3]):
+                with hcols[i]:
+                    if i * 2 < len(hotel_imgs):
+                        st.image(hotel_imgs[i * 2], use_container_width=True)
+                    why_html = (f'<p class="why-pick">"{hotel["why_pick"]}"</p>'
+                                if hotel.get("why_pick") else "")
+                    st.markdown(f"""
+                    <div class="hotel-card">
+                        <h4>{hotel.get("name","")}</h4>
+                        <p class="hotel-meta">📍 {hotel.get("location","")} &nbsp;•&nbsp; {hotel.get("type","")}</p>
+                        <div class="hotel-price">{hotel.get("price_per_night","")} <span>/ night</span></div>
+                        {why_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        # ── Transport ─────────────────────────────────────────────────────────
+        transport = plan.get("transport", "")
+        if transport:
+            st.markdown('<div class="section-title">🚂 Getting There & Around</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="transport-card">🚂 {transport}</div>', unsafe_allow_html=True)
+
+        # ── Budget breakdown ──────────────────────────────────────────────────
+        budget_data = plan.get("budget", {})
+        if budget_data:
+            total_est = sum(v for v in budget_data.values() if isinstance(v, (int, float)))
+            st.markdown('<div class="section-title">💰 Budget Breakdown</div>', unsafe_allow_html=True)
+
+            bar_colors = ["#667eea", "#f7971e", "#4facfe", "#43e97b"]
+            labels = {"transport":"🚂 Transport","accommodation":"🏨 Accommodation",
+                      "food":"🍛 Food & Dining","activities":"🎭 Activities"}
+            for i, (key, label) in enumerate(labels.items()):
+                val = budget_data.get(key, 0)
+                if not isinstance(val, (int, float)):
+                    continue
+                pct = int(val / total_est * 100) if total_est > 0 else 0
+                color = bar_colors[i % len(bar_colors)]
+                st.markdown(f"""
+                <div class="budget-row"><span>{label}</span><span style="color:{color}; font-weight:600;">₹{int(val):,}</span></div>
+                <div class="budget-bar-outer"><div class="budget-bar-inner" style="width:{pct}%; background:{color};"></div></div>
+                """, unsafe_allow_html=True)
+
+            within = total_est <= ctx.budget_total
+            st.markdown(f"""
+            <div class="budget-total-card">
+                <div class="t-label">Estimated Total</div>
+                <div class="t-value">₹{int(total_est):,}</div>
+                <div class="t-note">Your budget: ₹{ctx.budget_total:,} &nbsp;|&nbsp; {"✅ Within budget" if within else "⚠️ Slightly over — consider adjusting"}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ── Tips ──────────────────────────────────────────────────────────────
+        tips = plan.get("tips", [])
+        if tips:
+            st.markdown('<div class="section-title">💡 Travel Tips</div>', unsafe_allow_html=True)
+            for tip in tips:
+                st.markdown(f'<div class="tip-item">💡 {tip}</div>', unsafe_allow_html=True)
+
+    # ── Plan another trip ─────────────────────────────────────────────────────
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        if st.button("✈️  Plan Another Trip", use_container_width=True):
+            for key in ["page","plan","plan_text","all_images","by_dest","trip_context"]:
+                st.session_state.pop(key, None)
+            st.rerun()
+
+
+# ── Router ────────────────────────────────────────────────────────────────────
+if st.session_state.page == "form":
+    show_form()
+elif st.session_state.page == "searching":
+    show_searching()
+elif st.session_state.page == "results":
+    show_results()
