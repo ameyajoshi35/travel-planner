@@ -4,6 +4,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Inject Streamlit Cloud secrets into env vars (no-op locally when .env is present)
+for _key in ["GROQ_API_KEY", "TAVILY_API_KEY"]:
+    if not os.environ.get(_key) and _key in st.secrets:
+        os.environ[_key] = st.secrets[_key]
+
 from travel_planner.llm import generate_plan_v2
 from travel_planner.models import TripContext
 
