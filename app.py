@@ -9,6 +9,7 @@ for _key in ["GROQ_API_KEY", "TAVILY_API_KEY"]:
     if not os.environ.get(_key) and _key in st.secrets:
         os.environ[_key] = st.secrets[_key]
 
+from groq import RateLimitError
 from travel_planner.llm import generate_plan_v2
 from travel_planner.models import TripContext
 
@@ -136,6 +137,51 @@ html, body, [class*="css"] { font-family: 'Poppins', sans-serif; }
     border-radius: 16px; padding: 1.3rem 1.5rem;
     color: #333; font-size: 0.9rem; line-height: 1.6;
 }
+.transport-mode-card {
+    background: white; border-radius: 16px; padding: 1.4rem;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.08);
+    height: 100%; display: flex; flex-direction: column;
+}
+.transport-mode-icon { font-size: 2.2rem; margin-bottom: 0.4rem; }
+.transport-mode-title {
+    font-size: 1rem; font-weight: 700; color: #1a1a2e; margin-bottom: 0.6rem;
+    padding-bottom: 0.4rem; border-bottom: 2px solid #f0f0f0;
+}
+.transport-cost { font-size: 1.5rem; font-weight: 800; margin: 0.5rem 0 0.3rem; }
+.transport-detail { font-size: 0.82rem; color: #555; margin: 3px 0; line-height: 1.5; }
+.transport-tip {
+    font-size: 0.78rem; color: #667eea; margin-top: 10px;
+    padding: 6px 10px; background: #f0f3ff; border-radius: 8px;
+    font-style: italic; flex-shrink: 0;
+}
+.sources-label {
+    font-size: 0.72rem; color: #999; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase; margin: 12px 0 5px;
+}
+.source-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 4px; }
+.source-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #f0f4ff; border: 1px solid #c7d2fe;
+    border-radius: 20px; padding: 3px 11px;
+    font-size: 0.73rem; color: #3730a3; font-weight: 500;
+    text-decoration: none; white-space: nowrap;
+    max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+}
+.source-chip:hover { background: #e0e7ff; border-color: #818cf8; color: #1e1b4b; }
+
+.hotel-city-header {
+    font-size: 1.05rem; font-weight: 700; color: #1a1a2e;
+    margin: 1.2rem 0 0.6rem; padding: 0.5rem 0.8rem;
+    background: linear-gradient(135deg, #f5f7fa, #e8ecf8);
+    border-radius: 10px; border-left: 4px solid #667eea;
+}
+.hotel-type-badge {
+    display: inline-block; font-size: 0.7rem; font-weight: 700;
+    padding: 2px 8px; border-radius: 20px; margin-bottom: 5px;
+}
+.badge-budget { background: #ecfdf5; color: #065f46; }
+.badge-midrange { background: #fff7ed; color: #9a3412; }
+.badge-luxury { background: #fdf4ff; color: #6b21a8; }
 
 .budget-bar-outer { background: #f0f0f0; border-radius: 10px; height: 10px; overflow: hidden; margin: 4px 0 10px; }
 .budget-bar-inner { height: 100%; border-radius: 10px; }
@@ -190,6 +236,7 @@ html, body, [class*="css"] { font-family: 'Poppins', sans-serif; }
 for key, default in [
     ("page", "form"), ("plan", None), ("plan_text", None),
     ("all_images", []), ("by_dest", {}), ("trip_context", None),
+    ("hotels_by_location", {}), ("sources", {}),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -283,34 +330,67 @@ def show_searching():
     steps_box = st.container()
     img_preview = st.empty()
 
+    # Clear any stale plan data from previous runs before we start
+    for _k in ["plan", "plan_text", "all_images", "by_dest", "hotels_by_location", "sources"]:
+        st.session_state[_k] = None if _k in ("plan", "plan_text") else ([] if _k == "all_images" else {})
+
     all_images: list = []
     by_dest: dict = {}
+    hotels_by_location: dict = {}
+    sources: dict = {}
     plan_data = None
-    plan_text = None
     step = 0
 
-    for event in generate_plan_v2(ctx, phase):
-        if event["type"] == "searching":
-            step += 1
-            progress.progress(min(step / 14, 0.95))
-            with steps_box:
-                st.markdown(f'<div class="search-step">🔍 {event["query"]}</div>', unsafe_allow_html=True)
+    try:
+        for event in generate_plan_v2(ctx, phase):
+            if event["type"] == "searching":
+                step += 1
+                progress.progress(min(step / 18, 0.95))
+                with steps_box:
+                    st.markdown(f'<div class="search-step">🔍 {event["query"]}</div>', unsafe_allow_html=True)
 
-        elif event["type"] == "plan":
-            plan_data = event["data"]
-            plan_text = event["text"]
+            elif event["type"] == "plan":
+                plan_data = event["data"]
 
-        elif event["type"] == "images":
-            all_images = event["all"]
-            by_dest = event["by_dest"]
-            if all_images:
-                img_preview.image(all_images[:4], width=180)
+            elif event["type"] == "hotels":
+                hotels_by_location = event["by_location"]
+
+            elif event["type"] == "sources":
+                sources = event["data"]
+
+            elif event["type"] == "images":
+                all_images = event["all"]
+                by_dest = event["by_dest"]
+                if all_images:
+                    img_preview.image(all_images[:4], width=180)
+
+    except RateLimitError:
+        st.error(
+            "⏳ Groq rate limit reached — the free tier allows a limited number of "
+            "requests per minute. Please wait 30–60 seconds and try again."
+        )
+        _, mid, _ = st.columns([1, 2, 1])
+        with mid:
+            if st.button("🔄  Try Again", use_container_width=True):
+                st.session_state.page = "searching"
+                st.rerun()
+        return
+    except Exception as e:
+        st.error(f"Something went wrong while building your plan ({type(e).__name__}). Please try again.")
+        st.caption(f"Details: {str(e)[:300]}")
+        _, mid, _ = st.columns([1, 2, 1])
+        with mid:
+            if st.button("🔄  Try Again", use_container_width=True):
+                st.session_state.page = "searching"
+                st.rerun()
+        return
 
     progress.progress(1.0)
     st.session_state.plan = plan_data
-    st.session_state.plan_text = plan_text
     st.session_state.all_images = all_images
     st.session_state.by_dest = by_dest
+    st.session_state.hotels_by_location = hotels_by_location
+    st.session_state.sources = sources
     st.session_state.page = "results"
     st.rerun()
 
@@ -318,12 +398,28 @@ def show_searching():
 # ── RESULTS PAGE ──────────────────────────────────────────────────────────────
 def show_results():
     plan = st.session_state.plan
-    plan_text = st.session_state.plan_text
     images: list = st.session_state.all_images
     by_dest: dict = st.session_state.by_dest
+    hotels_by_location: dict = st.session_state.get("hotels_by_location", {})
+    sources: dict = st.session_state.get("sources", {})
     ctx: TripContext = st.session_state.trip_context
 
-    if plan is None and plan_text is None:
+    def _source_chips(items: list, label: str = "Sources") -> None:
+        """Render a row of clickable source-chip links."""
+        valid = [s for s in items if s.get("url", "").startswith("http")][:5]
+        if not valid:
+            return
+        chips = "".join(
+            f'<a class="source-chip" href="{s["url"]}" target="_blank" rel="noopener noreferrer">'
+            f'🔗 {s["title"][:55]}{"…" if len(s["title"]) > 55 else ""}</a>'
+            for s in valid
+        )
+        st.markdown(
+            f'<p class="sources-label">📎 {label}</p><div class="source-row">{chips}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if plan is None:
         st.error("Could not generate a plan. Please try again.")
         if st.button("← Back to form"):
             st.session_state.page = "form"
@@ -359,15 +455,24 @@ def show_results():
             st.markdown(f'<div class="stat-card" style="background:{grad}; color:{tc};"><div class="icon">{icon}</div><div class="label">{label}</div><div class="value">{val}</div></div>', unsafe_allow_html=True)
 
     if plan is None:
-        # Fallback — still show images then the text content
         if images:
             st.markdown('<div class="section-title">📸 Trip Photos</div>', unsafe_allow_html=True)
             gcols = st.columns(4)
             for i, url in enumerate(images[:8]):
                 with gcols[i % 4]:
                     st.image(url, use_container_width=True)
-        st.markdown('<div class="section-title">📋 Your Travel Plan</div>', unsafe_allow_html=True)
-        st.markdown(plan_text)
+        st.error(
+            "We couldn't format the plan this time — the search data was collected "
+            "successfully but the response couldn't be parsed. Please try again."
+        )
+        _, mid, _ = st.columns([1, 2, 1])
+        with mid:
+            if st.button("🔄  Try Again", use_container_width=True):
+                for key in ["plan", "plan_text", "all_images", "by_dest",
+                            "hotels_by_location", "sources"]:
+                    st.session_state.pop(key, None)
+                st.session_state.page = "searching"
+                st.rerun()
     else:
         # ── Destinations ──────────────────────────────────────────────────────
         destinations = plan.get("destinations", [])
@@ -427,6 +532,9 @@ def show_results():
                             with extra_cols[j]:
                                 st.image(extra_img, use_container_width=True)
 
+        if sources.get("destinations"):
+            _source_chips(sources["destinations"], "Destination info sourced from")
+
         # ── Photo gallery ─────────────────────────────────────────────────────
         gallery = [img for img in images if img not in [by_dest.get(d.get("name",""), [None])[0] for d in destinations]]
         if len(gallery) >= 4:
@@ -476,34 +584,96 @@ def show_results():
                 </div>
                 """, unsafe_allow_html=True)
 
-        # ── Hotels ────────────────────────────────────────────────────────────
-        hotels = plan.get("hotels", [])
-        if hotels:
-            st.markdown('<div class="section-title">🏨 Where to Stay</div>', unsafe_allow_html=True)
-            hcols = st.columns(min(len(hotels), 3))
-            # Use tail of images pool for hotels to avoid repeating destination hero images
-            hotel_imgs = images[-(len(hotels) * 2):]
+        # ── Transport — 3 mode cards ──────────────────────────────────────────
+        transport = plan.get("transport", {})
+        if isinstance(transport, dict) and transport:
+            st.markdown('<div class="section-title">🚀 Getting There</div>', unsafe_allow_html=True)
+            tc1, tc2, tc3 = st.columns(3)
 
-            for i, hotel in enumerate(hotels[:3]):
-                with hcols[i]:
-                    if i * 2 < len(hotel_imgs):
-                        st.image(hotel_imgs[i * 2], use_container_width=True)
-                    why_html = (f'<p class="why-pick">"{hotel["why_pick"]}"</p>'
-                                if hotel.get("why_pick") else "")
+            def _transport_card(col, icon, title, border_color, data: dict, cost_key="cost_per_person", cost_color="#f7971e"):
+                if not data:
+                    return
+                with col:
+                    details_html = ""
+                    skip = {cost_key, "booking_tip"}
+                    for k, v in data.items():
+                        if k in skip or not v:
+                            continue
+                        label = k.replace("_", " ").title()
+                        details_html += f'<p class="transport-detail"><b>{label}:</b> {v}</p>'
+                    tip_html = (f'<div class="transport-tip">💡 {data["booking_tip"]}</div>'
+                                if data.get("booking_tip") else "")
+                    cost_val = data.get(cost_key, "")
                     st.markdown(f"""
-                    <div class="hotel-card">
-                        <h4>{hotel.get("name","")}</h4>
-                        <p class="hotel-meta">📍 {hotel.get("location","")} &nbsp;•&nbsp; {hotel.get("type","")}</p>
-                        <div class="hotel-price">{hotel.get("price_per_night","")} <span>/ night</span></div>
-                        {why_html}
+                    <div class="transport-mode-card" style="border-top:4px solid {border_color};">
+                        <div class="transport-mode-icon">{icon}</div>
+                        <div class="transport-mode-title">{title}</div>
+                        <div class="transport-cost" style="color:{cost_color};">{cost_val}</div>
+                        {details_html}
+                        {tip_html}
                     </div>
                     """, unsafe_allow_html=True)
 
-        # ── Transport ─────────────────────────────────────────────────────────
-        transport = plan.get("transport", "")
-        if transport:
+            _transport_card(tc1, "✈️", "Flight", "#4facfe", transport.get("flight", {}),
+                            cost_key="cost_per_person", cost_color="#4facfe")
+            with tc1:
+                _source_chips(sources.get("flight", []), "Flight sources")
+
+            _transport_card(tc2, "🚂", "Train", "#f7971e", transport.get("train", {}),
+                            cost_key="cost_per_person", cost_color="#f7971e")
+            with tc2:
+                _source_chips(sources.get("train", []), "Train sources")
+
+            _transport_card(tc3, "🚗", "Rented Vehicle", "#43e97b", transport.get("rented_vehicle", {}),
+                            cost_key="total_estimate", cost_color="#43e97b")
+            with tc3:
+                _source_chips(sources.get("car", []), "Car rental sources")
+
+        elif isinstance(transport, str) and transport:
             st.markdown('<div class="section-title">🚂 Getting There & Around</div>', unsafe_allow_html=True)
             st.markdown(f'<div class="transport-card">🚂 {transport}</div>', unsafe_allow_html=True)
+            all_transport_srcs = sources.get("flight", []) + sources.get("train", []) + sources.get("car", [])
+            _source_chips(all_transport_srcs, "Transport sources")
+
+        # ── Hotels by overnight-stay location ────────────────────────────────
+        overnight_cities = list(dict.fromkeys(
+            day.get("stay", day.get("location", "")).strip()
+            for day in itinerary
+            if day.get("stay") or day.get("location")
+        ))
+
+        # Merge with any hotels_by_location keys in case of slight name mismatch
+        hotel_cities = list(hotels_by_location.keys()) if hotels_by_location else overnight_cities
+
+        if hotel_cities:
+            st.markdown('<div class="section-title">🏨 Where to Stay</div>', unsafe_allow_html=True)
+
+            badge_class = {"Budget": "badge-budget", "Mid-range": "badge-midrange", "Luxury": "badge-luxury"}
+
+            for city in hotel_cities:
+                city_hotels = hotels_by_location.get(city, [])
+                if not city_hotels:
+                    continue
+                st.markdown(f'<div class="hotel-city-header">📍 {city}</div>', unsafe_allow_html=True)
+                hcols = st.columns(min(len(city_hotels), 3))
+                for i, hotel in enumerate(city_hotels[:3]):
+                    htype = hotel.get("type", "")
+                    badge_cls = badge_class.get(htype, "badge-budget")
+                    why_html = (f'<p class="why-pick">"{hotel["why_pick"]}"</p>'
+                                if hotel.get("why_pick") else "")
+                    rating_html = (f'<span style="color:#f7971e; font-weight:600; font-size:0.82rem;">★ {hotel["rating"]}</span>'
+                                   if hotel.get("rating") else "")
+                    with hcols[i]:
+                        st.markdown(f"""
+                        <div class="hotel-card">
+                            <span class="hotel-type-badge {badge_cls}">{htype}</span>
+                            <h4>{hotel.get("name","")}</h4>
+                            <p class="hotel-meta">📍 {city} &nbsp; {rating_html}</p>
+                            <div class="hotel-price">{hotel.get("price_per_night","")} <span>/ night</span></div>
+                            {why_html}
+                        </div>
+                        """, unsafe_allow_html=True)
+                _source_chips(sources.get("hotels", {}).get(city, []), f"Hotel sources — {city}")
 
         # ── Budget breakdown ──────────────────────────────────────────────────
         budget_data = plan.get("budget", {})
@@ -546,7 +716,8 @@ def show_results():
     _, mid, _ = st.columns([1, 2, 1])
     with mid:
         if st.button("✈️  Plan Another Trip", use_container_width=True):
-            for key in ["page","plan","plan_text","all_images","by_dest","trip_context"]:
+            for key in ["page", "plan", "all_images", "by_dest",
+                        "trip_context", "hotels_by_location", "sources"]:
                 st.session_state.pop(key, None)
             st.rerun()
 

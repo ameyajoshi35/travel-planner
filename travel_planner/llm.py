@@ -1,13 +1,15 @@
 import json
 import re
+import time
 from typing import Generator, List, Optional
 
-from groq import Groq
+from groq import Groq, RateLimitError
 
 from .models import TripContext
 from .prompts import (
     CONFIRMATION_TEMPLATE,
     EXTRACT_SYSTEM,
+    HOTELS_JSON_SCHEMA,
     PLAN_JSON_SCHEMA,
     RESPONSE_SYSTEM_TEMPLATE,
     SUGGESTION_JSON_SCHEMA,
@@ -25,12 +27,24 @@ def _get_client() -> Groq:
 
 
 def _chat(system: str, messages: List[dict], max_tokens: int) -> str:
-    response = _get_client().chat.completions.create(
-        model=MODEL,
+    return _create(
         max_tokens=max_tokens,
         messages=[{"role": "system", "content": system}] + messages,
-    )
-    return response.choices[0].message.content.strip()
+    ).choices[0].message.content.strip()
+
+
+def _create(max_tokens: int, messages: list, response_format: Optional[dict] = None) -> object:
+    kwargs = dict(model=MODEL, max_tokens=max_tokens, messages=messages)
+    if response_format:
+        kwargs["response_format"] = response_format
+    for attempt in range(3):
+        try:
+            return _get_client().chat.completions.create(**kwargs)
+        except RateLimitError:
+            if attempt < 2:
+                time.sleep(8 * (attempt + 1))  # 8s, 16s
+            else:
+                raise
 
 
 def extract_inputs(user_message: str, trip_context: TripContext) -> dict:
@@ -78,10 +92,11 @@ def generate_plan_v2(trip_context: TripContext, phase: str) -> Generator[dict, N
     if phase == "planning":
         search_tasks = [
             (f"{dest} India top tourist attractions places to visit must see", dest),
-            (f"best hotels {dest} India {traveler_type} accommodation options", dest),
             (f"{dest} {month} things to do activities local experiences", dest),
-            (f"travel {starting} to {dest} trains flights road transport options", "transport"),
             (f"{dest} India {duration} day travel itinerary guide tips", dest),
+            (f"flights {starting} to {dest} price fare economy class {month} airlines booking", "transport_flight"),
+            (f"train {starting} to {dest} IRCTC express schedule fare class {month}", "transport_train"),
+            (f"car rental self drive cab hire {starting} to {dest} charges per day {month}", "transport_car"),
         ]
     else:
         search_tasks = [
@@ -92,6 +107,7 @@ def generate_plan_v2(trip_context: TripContext, phase: str) -> Generator[dict, N
         ]
 
     all_results: List[str] = []
+    all_sources: dict = {"flight": [], "train": [], "car": [], "destinations": [], "hotels": {}}
 
     # Phase 1: text-only searches for planning content
     for query, label in search_tasks:
@@ -102,6 +118,16 @@ def generate_plan_v2(trip_context: TripContext, phase: str) -> Generator[dict, N
         )
         all_results.append(f"### {query}\n{snippets}")
 
+        urls = [{"title": r["title"], "url": r["url"]} for r in result["results"] if r.get("url")]
+        if label == "transport_flight":
+            all_sources["flight"].extend(urls)
+        elif label == "transport_train":
+            all_sources["train"].extend(urls)
+        elif label == "transport_car":
+            all_sources["car"].extend(urls)
+        else:
+            all_sources["destinations"].extend(urls)
+
     yield {"type": "searching", "query": "Crafting your personalised travel plan…"}
 
     combined_results = "\n\n".join(all_results)
@@ -110,22 +136,18 @@ def generate_plan_v2(trip_context: TripContext, phase: str) -> Generator[dict, N
         system = (
             f"You are an India travel expert. Based on the search results, create a detailed trip plan.\n\n"
             f"Trip details:\n{trip_context.to_json()}\n\n"
-            f"IMPORTANT: Return ONLY the raw JSON object — no markdown fences, no explanation, "
-            f"no text before or after. Start your response with {{ and end with }}.\n\n"
-            f"Use this exact structure:\n{PLAN_JSON_SCHEMA}"
+            f"Return a JSON object using exactly this structure:\n{PLAN_JSON_SCHEMA}"
         )
     else:
         system = (
             f"You are an India travel expert. Based on the search results, suggest the best 3 destinations.\n\n"
             f"Trip details:\n{trip_context.to_json()}\n\n"
-            f"IMPORTANT: Return ONLY the raw JSON object — no markdown fences, no explanation, "
-            f"no text before or after. Start your response with {{ and end with }}.\n\n"
-            f"Use this exact structure:\n{SUGGESTION_JSON_SCHEMA}"
+            f"Return a JSON object using exactly this structure:\n{SUGGESTION_JSON_SCHEMA}"
         )
 
-    response = _get_client().chat.completions.create(
-        model=MODEL,
-        max_tokens=6000,
+    response = _create(
+        max_tokens=3500,
+        response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": f"Search results:\n\n{combined_results}\n\nProduce the JSON plan now."},
@@ -133,22 +155,77 @@ def generate_plan_v2(trip_context: TripContext, phase: str) -> Generator[dict, N
     )
 
     raw = response.choices[0].message.content.strip()
-    # Strip any markdown fences
-    raw = re.sub(r"```(?:json)?", "", raw).strip()
-    # Extract the outermost JSON object even if there's surrounding text
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        raw = raw[start : end + 1]
 
-    try:
-        plan_data = json.loads(raw)
-    except json.JSONDecodeError:
-        plan_data = None
+    def _try_parse(s: str):
+        # Strip markdown fences and extract outermost {}
+        s = re.sub(r"```(?:json)?", "", s).strip()
+        start = s.find("{")
+        end = s.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            s = s[start : end + 1]
+        try:
+            return json.loads(s), s
+        except json.JSONDecodeError:
+            # Remove trailing commas before } or ]
+            fixed = re.sub(r",(\s*[}\]])", r"\1", s)
+            try:
+                return json.loads(fixed), fixed
+            except json.JSONDecodeError:
+                return None, s
 
-    yield {"type": "plan", "data": plan_data, "text": raw if plan_data is None else None}
+    plan_data, raw = _try_parse(raw)
 
-    # Phase 2: targeted image searches now that we know the exact destinations
+    yield {"type": "plan", "data": plan_data, "text": None}
+
+    # Phase 2: per-city hotel searches
+    hotels_by_location: dict = {}
+    if plan_data and phase == "planning":
+        dest_cities = [d["name"] for d in plan_data.get("destinations", [])]
+        if not dest_cities:
+            dest_cities = [dest]
+
+        hotel_search_results: dict = {}
+        for city in dest_cities[:3]:
+            yield {"type": "searching", "query": f"Finding hotel options in {city}…"}
+            hotel_result = tavily_search(
+                f"best hotels {city} India price per night {traveler_type} booking options reviews",
+                max_results=5, include_images=False,
+            )
+            hotel_search_results[city] = "\n".join(
+                f"[{r['title']}] {r['content'][:500]}" for r in hotel_result["results"]
+            )
+            all_sources["hotels"][city] = [
+                {"title": r["title"], "url": r["url"]} for r in hotel_result["results"] if r.get("url")
+            ]
+
+        yield {"type": "searching", "query": "Compiling hotel recommendations…"}
+        hotel_system = (
+            "You are a hotel expert for India travel. Based on the search results below, suggest exactly "
+            "3 hotels per city — one Budget, one Mid-range, one Luxury — with real hotel names, prices, "
+            "ratings, and a one-line reason to pick each.\n\n"
+            "Return a JSON object with this exact structure:\n"
+            f"{HOTELS_JSON_SCHEMA}"
+        )
+        hotel_user = "\n\n".join(
+            f"### Hotels in {city}:\n{snippets}"
+            for city, snippets in hotel_search_results.items()
+        ) + f"\n\nTrip context: {trip_context.to_json()}"
+
+        hotel_response = _create(
+            max_tokens=1800,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": hotel_system},
+                {"role": "user", "content": hotel_user + "\n\nReturn the JSON now."},
+            ],
+        )
+        hotel_data, _ = _try_parse(hotel_response.choices[0].message.content)
+        hotels_by_location = (hotel_data or {}).get("hotels_by_location", {})
+
+    yield {"type": "hotels", "by_location": hotels_by_location}
+    yield {"type": "sources", "data": all_sources}
+
+    # Phase 3: targeted image searches now that we know the exact destinations
     dest_names: List[str] = []
     if plan_data:
         dest_names = [d["name"] for d in plan_data.get("destinations", [])]

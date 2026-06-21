@@ -98,19 +98,33 @@ PLAN_JSON_SCHEMA = """{
       "morning": "Detailed morning plan — what to visit, what to eat, practical tip",
       "afternoon": "Detailed afternoon plan — activities, sights, experiences",
       "evening": "Evening plan — sunset spot, dinner recommendation, nightlife or relaxation",
-      "stay": "Hotel name or neighbourhood"
+      "stay": "City name where you sleep tonight (used for hotel lookup — must match a destination name)"
     }
   ],
-  "hotels": [
-    {
-      "name": "Hotel name",
-      "location": "City",
-      "type": "Budget/Mid-range/Luxury",
-      "price_per_night": "₹X,XXX",
-      "why_pick": "One sentence on why this hotel is great for this traveller"
+  "transport": {
+    "flight": {
+      "airlines": "e.g. IndiGo, Air India, SpiceJet",
+      "route": "e.g. Mumbai → Jaipur",
+      "duration": "e.g. 1h 50min",
+      "cost_per_person": "e.g. ₹4,500",
+      "booking_tip": "e.g. Book on MakeMyTrip or Cleartrip 3-4 weeks in advance for best fares"
+    },
+    "train": {
+      "name": "e.g. Rajdhani Express / Mandore Express",
+      "number": "e.g. 12957",
+      "route": "e.g. Mumbai Central → Jaipur Junction",
+      "duration": "e.g. 17h 30min",
+      "cost_per_person": "e.g. ₹1,200 (Sleeper) / ₹2,800 (3AC) / ₹4,200 (2AC)",
+      "booking_tip": "e.g. Book on IRCTC at least 3 weeks ahead; use Tatkal quota for last-minute"
+    },
+    "rented_vehicle": {
+      "vehicle_type": "e.g. Sedan (Swift Dzire) or SUV (Toyota Innova)",
+      "estimated_cost_per_day": "e.g. ₹2,500 self-drive / ₹3,500 with driver",
+      "fuel_estimate": "e.g. ₹4,500 total for the trip",
+      "total_estimate": "e.g. ₹22,000 for 7 days with driver",
+      "booking_tip": "e.g. Book on Zoomcar for self-drive; use Savaari or local aggregators for chauffeur-driven"
     }
-  ],
-  "transport": "Detailed transport info — how to get there, getting around locally, best options",
+  },
   "budget": {
     "transport": 15000,
     "accommodation": 20000,
@@ -118,6 +132,34 @@ PLAN_JSON_SCHEMA = """{
     "activities": 5000
   },
   "tips": ["Practical tip 1", "Practical tip 2", "Practical tip 3", "Practical tip 4"]
+}"""
+
+HOTELS_JSON_SCHEMA = """{
+  "hotels_by_location": {
+    "City Name": [
+      {
+        "name": "Hotel name",
+        "type": "Budget",
+        "price_per_night": "₹1,500",
+        "rating": "4.2/5",
+        "why_pick": "Best value hotel close to the main market"
+      },
+      {
+        "name": "Hotel name",
+        "type": "Mid-range",
+        "price_per_night": "₹4,500",
+        "rating": "4.5/5",
+        "why_pick": "Great amenities, pool, and central location"
+      },
+      {
+        "name": "Hotel name",
+        "type": "Luxury",
+        "price_per_night": "₹12,000",
+        "rating": "4.8/5",
+        "why_pick": "Premium heritage experience with top-class service"
+      }
+    ]
+  }
 }"""
 
 SUGGESTION_JSON_SCHEMA = """{
@@ -156,7 +198,11 @@ SUGGESTION_JSON_SCHEMA = """{
       "why_pick": "Why this hotel suits the traveller"
     }
   ],
-  "transport": "How to reach each option from the departure city",
+  "transport": {
+    "flight": {"airlines": "Airlines serving the route", "route": "Origin → Destination", "duration": "e.g. 2h", "cost_per_person": "₹X,XXX", "booking_tip": "Booking advice"},
+    "train": {"name": "Train name", "number": "Train number", "route": "Origin → Destination", "duration": "e.g. 12h", "cost_per_person": "₹X,XXX (class)", "booking_tip": "Booking advice"},
+    "rented_vehicle": {"vehicle_type": "Sedan/SUV", "estimated_cost_per_day": "₹X,XXX", "fuel_estimate": "₹X,XXX", "total_estimate": "₹X,XXX for N days", "booking_tip": "Booking advice"}
+  },
   "budget": {
     "transport": 15000,
     "accommodation": 20000,
