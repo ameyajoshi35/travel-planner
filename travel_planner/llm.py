@@ -47,6 +47,26 @@ def _create(max_tokens: int, messages: list, response_format: Optional[dict] = N
                 raise
 
 
+# Public helpers for agents to import
+create_completion = _create
+
+
+def parse_json(s: str) -> Optional[dict]:
+    """Parse JSON from an LLM response with fallback cleanup."""
+    s = re.sub(r"```(?:json)?", "", s).strip()
+    start, end = s.find("{"), s.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        s = s[start : end + 1]
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        fixed = re.sub(r",(\s*[}\]])", r"\1", s)
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            return None
+
+
 def extract_inputs(user_message: str, trip_context: TripContext) -> dict:
     user_content = f"Current context: {trip_context.to_json()}\nUser said: {user_message}"
     raw = _chat(EXTRACT_SYSTEM, [{"role": "user", "content": user_content}], max_tokens=512)

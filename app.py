@@ -10,7 +10,7 @@ for _key in ["GROQ_API_KEY", "TAVILY_API_KEY"]:
         os.environ[_key] = st.secrets[_key]
 
 from groq import RateLimitError
-from travel_planner.llm import generate_plan_v2
+from travel_planner import orchestrator
 from travel_planner.models import TripContext
 
 st.set_page_config(page_title="India Travel Planner", page_icon="✈️", layout="wide")
@@ -236,7 +236,7 @@ html, body, [class*="css"] { font-family: 'Poppins', sans-serif; }
 for key, default in [
     ("page", "form"), ("plan", None), ("plan_text", None),
     ("all_images", []), ("by_dest", {}), ("trip_context", None),
-    ("hotels_by_location", {}), ("sources", {}),
+    ("hotels_by_location", {}), ("sources", {}), ("transport", {}),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -338,11 +338,12 @@ def show_searching():
     by_dest: dict = {}
     hotels_by_location: dict = {}
     sources: dict = {}
+    transport: dict = {}
     plan_data = None
     step = 0
 
     try:
-        for event in generate_plan_v2(ctx, phase):
+        for event in orchestrator.run(ctx, phase):
             if event["type"] == "searching":
                 step += 1
                 progress.progress(min(step / 18, 0.95))
@@ -351,6 +352,9 @@ def show_searching():
 
             elif event["type"] == "plan":
                 plan_data = event["data"]
+
+            elif event["type"] == "transport":
+                transport = event
 
             elif event["type"] == "hotels":
                 hotels_by_location = event["by_location"]
@@ -387,6 +391,7 @@ def show_searching():
 
     progress.progress(1.0)
     st.session_state.plan = plan_data
+    st.session_state.transport = transport
     st.session_state.all_images = all_images
     st.session_state.by_dest = by_dest
     st.session_state.hotels_by_location = hotels_by_location
@@ -398,6 +403,7 @@ def show_searching():
 # ── RESULTS PAGE ──────────────────────────────────────────────────────────────
 def show_results():
     plan = st.session_state.plan
+    transport: dict = st.session_state.get("transport", {})
     images: list = st.session_state.all_images
     by_dest: dict = st.session_state.by_dest
     hotels_by_location: dict = st.session_state.get("hotels_by_location", {})
@@ -584,56 +590,59 @@ def show_results():
                 </div>
                 """, unsafe_allow_html=True)
 
-        # ── Transport — 3 mode cards ──────────────────────────────────────────
-        transport = plan.get("transport", {})
-        if isinstance(transport, dict) and transport:
-            st.markdown('<div class="section-title">🚀 Getting There</div>', unsafe_allow_html=True)
-            tc1, tc2, tc3 = st.columns(3)
+        # ── Transport — agent-powered mode cards ─────────────────────────────
+        flight_data  = transport.get("flight",  {"options": [], "sources": []})
+        train_data   = transport.get("train",   {"options": [], "sources": []})
+        vehicle_data = transport.get("vehicle", {"options": [], "sources": []})
 
-            def _transport_card(col, icon, title, border_color, data: dict, cost_key="cost_per_person", cost_color="#f7971e"):
-                if not data:
+        if any([flight_data["options"], train_data["options"], vehicle_data["options"]]):
+            st.markdown('<div class="section-title">🚀 Getting There</div>', unsafe_allow_html=True)
+
+            def _agent_transport_col(col, icon, title, border_color, cost_color, agent_data: dict, cost_key: str):
+                options = agent_data.get("options", [])
+                if not options:
                     return
                 with col:
-                    details_html = ""
-                    skip = {cost_key, "booking_tip"}
-                    for k, v in data.items():
-                        if k in skip or not v:
-                            continue
-                        label = k.replace("_", " ").title()
-                        details_html += f'<p class="transport-detail"><b>{label}:</b> {v}</p>'
-                    tip_html = (f'<div class="transport-tip">💡 {data["booking_tip"]}</div>'
-                                if data.get("booking_tip") else "")
-                    cost_val = data.get(cost_key, "")
+                    best = options[0]
+                    details_html = "".join(
+                        f'<p class="transport-detail"><b>{k.replace("_"," ").title()}:</b> {v}</p>'
+                        for k, v in best.items()
+                        if k not in {cost_key, "booking_tip"} and v
+                    )
+                    tip_html = (f'<div class="transport-tip">💡 {best["booking_tip"]}</div>'
+                                if best.get("booking_tip") else "")
                     st.markdown(f"""
                     <div class="transport-mode-card" style="border-top:4px solid {border_color};">
                         <div class="transport-mode-icon">{icon}</div>
                         <div class="transport-mode-title">{title}</div>
-                        <div class="transport-cost" style="color:{cost_color};">{cost_val}</div>
-                        {details_html}
-                        {tip_html}
+                        <div class="transport-cost" style="color:{cost_color};">{best.get(cost_key,"")}</div>
+                        {details_html}{tip_html}
                     </div>
                     """, unsafe_allow_html=True)
 
-            _transport_card(tc1, "✈️", "Flight", "#4facfe", transport.get("flight", {}),
-                            cost_key="cost_per_person", cost_color="#4facfe")
-            with tc1:
-                _source_chips(sources.get("flight", []), "Flight sources")
+                    # Additional options
+                    for opt in options[1:]:
+                        alt_details = "".join(
+                            f'<p class="transport-detail"><b>{k.replace("_"," ").title()}:</b> {v}</p>'
+                            for k, v in opt.items()
+                            if k not in {cost_key, "booking_tip"} and v
+                        )
+                        alt_tip = (f'<div class="transport-tip">💡 {opt["booking_tip"]}</div>'
+                                   if opt.get("booking_tip") else "")
+                        st.markdown(f"""
+                        <div class="transport-mode-card" style="border-top:2px solid {border_color}; margin-top:8px; opacity:0.85;">
+                            <div class="transport-mode-title" style="font-size:0.88rem;">Alternative</div>
+                            <div class="transport-cost" style="color:{cost_color}; font-size:1.1rem;">{opt.get(cost_key,"")}</div>
+                            {alt_details}{alt_tip}
+                        </div>
+                        """, unsafe_allow_html=True)
 
-            _transport_card(tc2, "🚂", "Train", "#f7971e", transport.get("train", {}),
-                            cost_key="cost_per_person", cost_color="#f7971e")
-            with tc2:
-                _source_chips(sources.get("train", []), "Train sources")
+                    _source_chips(agent_data.get("sources", []), f"{title} sources")
 
-            _transport_card(tc3, "🚗", "Rented Vehicle", "#43e97b", transport.get("rented_vehicle", {}),
-                            cost_key="total_estimate", cost_color="#43e97b")
-            with tc3:
-                _source_chips(sources.get("car", []), "Car rental sources")
-
-        elif isinstance(transport, str) and transport:
-            st.markdown('<div class="section-title">🚂 Getting There & Around</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="transport-card">🚂 {transport}</div>', unsafe_allow_html=True)
-            all_transport_srcs = sources.get("flight", []) + sources.get("train", []) + sources.get("car", [])
-            _source_chips(all_transport_srcs, "Transport sources")
+            tc1, tc2, tc3 = st.columns(3)
+            _agent_transport_col(tc1, "✈️", "Flight",          "#4facfe", "#4facfe", flight_data,  "cost_per_person")
+            _agent_transport_col(tc2, "🚂", "Train",           "#f7971e", "#f7971e", train_data,   "sleeper")
+            _agent_transport_col(tc3, "🚗", "Rented Vehicle",  "#43e97b", "#43e97b", vehicle_data, "total_estimate")
 
         # ── Hotels by overnight-stay location ────────────────────────────────
         overnight_cities = list(dict.fromkeys(

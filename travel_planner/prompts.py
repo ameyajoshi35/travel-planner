@@ -75,6 +75,84 @@ rough cost breakdown, and how to get there from {starting_city}
 - Format in clean markdown
 """
 
+PLANNER_JSON_SCHEMA = """{
+  "trip_title": "Catchy inspiring trip title",
+  "overview": "2-3 vivid sentences painting the journey",
+  "destinations": [
+    {
+      "name": "City or place name",
+      "tagline": "Short evocative tagline e.g. The Pink City",
+      "description": "2-3 sentences about why this place is special",
+      "history": "1-2 fascinating sentences about the history or origin of this place",
+      "unique_facts": ["Surprising fact 1", "Unique fact 2", "Interesting fact 3"],
+      "fun_activities": ["Activity 1", "Activity 2", "Activity 3", "Activity 4"],
+      "highlights": ["Landmark 1", "Landmark 2", "Landmark 3", "Landmark 4"]
+    }
+  ],
+  "itinerary": [
+    {
+      "day": 1,
+      "title": "Arrival and first impressions",
+      "location": "City name",
+      "fun_highlight": "Most exciting thing about today in one punchy sentence",
+      "morning": "Detailed morning plan",
+      "afternoon": "Detailed afternoon plan",
+      "evening": "Evening plan",
+      "stay": "City name where you sleep tonight (used for hotel lookup)"
+    }
+  ],
+  "budget": {
+    "transport": 15000,
+    "accommodation": 20000,
+    "food": 8000,
+    "activities": 5000
+  },
+  "tips": ["Practical tip 1", "Practical tip 2", "Practical tip 3", "Practical tip 4"]
+}"""
+
+FLIGHT_OPTIONS_SCHEMA = """{
+  "options": [
+    {
+      "airlines": "e.g. IndiGo / Air India / SpiceJet",
+      "route": "e.g. Mumbai → Kochi",
+      "duration": "e.g. 2h 15min",
+      "cost_per_person": "e.g. ₹4,200",
+      "class": "Economy",
+      "booking_tip": "e.g. Book on MakeMyTrip 3-4 weeks ahead for best fares"
+    }
+  ]
+}"""
+
+TRAIN_OPTIONS_SCHEMA = """{
+  "options": [
+    {
+      "name": "e.g. Kerala Express",
+      "number": "e.g. 16343",
+      "route": "e.g. Mumbai CST → Ernakulam Jn",
+      "departure": "e.g. 09:30",
+      "arrival": "e.g. 11:25+1",
+      "duration": "e.g. 25h 55min",
+      "sleeper": "e.g. ₹650",
+      "third_ac": "e.g. ₹1,750",
+      "second_ac": "e.g. ₹2,500",
+      "frequency": "e.g. Daily / Mon, Wed, Fri",
+      "booking_tip": "e.g. Book on irctc.co.in at least 3 weeks ahead"
+    }
+  ]
+}"""
+
+VEHICLE_OPTIONS_SCHEMA = """{
+  "options": [
+    {
+      "vehicle_type": "e.g. Sedan (Swift Dzire) or SUV (Innova Crysta)",
+      "cost_per_day": "e.g. ₹2,500 self-drive / ₹3,500 with driver",
+      "fuel_estimate": "e.g. ₹4,000 for full trip",
+      "total_estimate": "e.g. ₹21,500 for 7 days with driver",
+      "booking_tip": "e.g. Zoomcar for self-drive; Savaari or local aggregators for chauffeur-driven"
+    }
+  ]
+}"""
+
 PLAN_JSON_SCHEMA = """{
   "trip_title": "Catchy inspiring trip title",
   "overview": "2-3 vivid sentences painting the journey",
