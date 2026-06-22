@@ -11,6 +11,7 @@ for _key in ["GROQ_API_KEY", "TAVILY_API_KEY"]:
 
 from groq import RateLimitError
 from travel_planner import orchestrator
+from travel_planner import booking_links as blinks
 from travel_planner.models import TripContext
 
 st.set_page_config(page_title="India Travel Planner", page_icon="✈️", layout="wide")
@@ -168,6 +169,19 @@ html, body, [class*="css"] { font-family: 'Poppins', sans-serif; }
     max-width: 240px; overflow: hidden; text-overflow: ellipsis;
 }
 .source-chip:hover { background: #e0e7ff; border-color: #818cf8; color: #1e1b4b; }
+
+.book-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px 0; }
+.book-btn {
+    display: inline-block; padding: 5px 13px;
+    border-radius: 20px; font-size: 0.76rem; font-weight: 700;
+    text-decoration: none; color: #fff;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    transition: opacity 0.18s, transform 0.15s;
+    white-space: nowrap;
+}
+.book-btn:hover { opacity: 0.82; transform: translateY(-1px); color: #fff; text-decoration: none; }
+.book-label { font-size: 0.7rem; font-weight: 600; color: #888; text-transform: uppercase;
+              letter-spacing: 0.06em; margin-bottom: 2px; }
 
 .hotel-city-header {
     font-size: 1.05rem; font-weight: 700; color: #1a1a2e;
@@ -425,6 +439,20 @@ def show_results():
             unsafe_allow_html=True,
         )
 
+    def _book_buttons(links: list, label: str = "Book now") -> None:
+        """Render a row of booking-platform deep-link buttons."""
+        if not links:
+            return
+        btns = "".join(
+            f'<a class="book-btn" href="{lnk["url"]}" target="_blank" rel="noopener noreferrer">'
+            f'{lnk["label"]}</a>'
+            for lnk in links
+        )
+        st.markdown(
+            f'<p class="book-label">{label}</p><div class="book-row">{btns}</div>',
+            unsafe_allow_html=True,
+        )
+
     if plan is None:
         st.error("Could not generate a plan. Please try again.")
         if st.button("← Back to form"):
@@ -598,7 +626,8 @@ def show_results():
         if any([flight_data["options"], train_data["options"], vehicle_data["options"]]):
             st.markdown('<div class="section-title">🚀 Getting There</div>', unsafe_allow_html=True)
 
-            def _agent_transport_col(col, icon, title, border_color, cost_color, agent_data: dict, cost_key: str):
+            def _agent_transport_col(col, icon, title, border_color, cost_color,
+                                     agent_data: dict, cost_key: str, links_fn):
                 options = agent_data.get("options", [])
                 if not options:
                     return
@@ -620,6 +649,8 @@ def show_results():
                     </div>
                     """, unsafe_allow_html=True)
 
+                    _book_buttons(links_fn(ctx), "Book now")
+
                     # Additional options
                     for opt in options[1:]:
                         alt_details = "".join(
@@ -640,9 +671,9 @@ def show_results():
                     _source_chips(agent_data.get("sources", []), f"{title} sources")
 
             tc1, tc2, tc3 = st.columns(3)
-            _agent_transport_col(tc1, "✈️", "Flight",          "#4facfe", "#4facfe", flight_data,  "cost_per_person")
-            _agent_transport_col(tc2, "🚂", "Train",           "#f7971e", "#f7971e", train_data,   "sleeper")
-            _agent_transport_col(tc3, "🚗", "Rented Vehicle",  "#43e97b", "#43e97b", vehicle_data, "total_estimate")
+            _agent_transport_col(tc1, "✈️", "Flight",         "#4facfe", "#4facfe", flight_data,  "cost_per_person", blinks.flight_links)
+            _agent_transport_col(tc2, "🚂", "Train",          "#f7971e", "#f7971e", train_data,   "sleeper",         blinks.train_links)
+            _agent_transport_col(tc3, "🚗", "Rented Vehicle", "#43e97b", "#43e97b", vehicle_data, "total_estimate",  blinks.vehicle_links)
 
         # ── Hotels by overnight-stay location ────────────────────────────────
         overnight_cities = list(dict.fromkeys(
@@ -682,6 +713,7 @@ def show_results():
                             {why_html}
                         </div>
                         """, unsafe_allow_html=True)
+                        _book_buttons(blinks.hotel_links(ctx, city), "Check availability")
                 _source_chips(sources.get("hotels", {}).get(city, []), f"Hotel sources — {city}")
 
         # ── Budget breakdown ──────────────────────────────────────────────────
