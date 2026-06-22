@@ -170,6 +170,42 @@ html, body, [class*="css"] { font-family: 'Poppins', sans-serif; }
 }
 .source-chip:hover { background: #e0e7ff; border-color: #818cf8; color: #1e1b4b; }
 
+.hero-tagline-single {
+    text-align: center;
+    padding: 2.4rem 1.5rem 2rem;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 55%, #0f3460 100%);
+    border-radius: 18px;
+    margin-bottom: 1rem;
+}
+.hero-dest-name {
+    font-size: 0.85rem; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.22em;
+    color: #f7971e; margin-bottom: 0.5rem;
+}
+.hero-tagline-text {
+    font-size: 2.3rem; font-weight: 800; font-style: italic;
+    color: #fff; line-height: 1.2;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.4);
+}
+.dest-taglines-row {
+    display: flex; gap: 12px; margin-bottom: 1rem; flex-wrap: wrap;
+}
+.dest-tag-card {
+    flex: 1; min-width: 160px;
+    background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%);
+    border-radius: 14px; padding: 1.3rem 1rem; text-align: center;
+    border-bottom: 3px solid #f7971e;
+}
+.dtc-name {
+    font-size: 0.72rem; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.18em;
+    color: #f7971e; margin-bottom: 0.35rem;
+}
+.dtc-line {
+    font-size: 1rem; font-weight: 600; font-style: italic;
+    color: #fff; line-height: 1.35;
+}
+
 .book-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px 0; }
 .book-btn {
     display: inline-block; padding: 5px 13px;
@@ -459,6 +495,31 @@ def show_results():
             st.session_state.page = "form"
             st.rerun()
         return
+
+    # ── Destination tagline(s) ────────────────────────────────────────────────
+    dest_taglines = [
+        (d.get("name", ""), d.get("tagline", ""))
+        for d in (plan.get("destinations", []) if plan else [])
+        if d.get("tagline")
+    ]
+    if dest_taglines:
+        if len(dest_taglines) == 1:
+            name, tagline = dest_taglines[0]
+            st.markdown(f"""
+            <div class="hero-tagline-single">
+                <div class="hero-dest-name">✦ {name} ✦</div>
+                <div class="hero-tagline-text">{tagline}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            cards = "".join(
+                f'<div class="dest-tag-card">'
+                f'<div class="dtc-name">✦ {name} ✦</div>'
+                f'<div class="dtc-line">{tagline}</div>'
+                f'</div>'
+                for name, tagline in dest_taglines
+            )
+            st.markdown(f'<div class="dest-taglines-row">{cards}</div>', unsafe_allow_html=True)
 
     # ── Hero image ────────────────────────────────────────────────────────────
     if images:
