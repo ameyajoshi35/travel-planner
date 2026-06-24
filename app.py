@@ -521,71 +521,75 @@ def show_suggestions():
         return
 
     _e = html_lib.escape
-    cols = st.columns(len(dests))
-
-    for col, dest in zip(cols, dests):
-        name       = dest.get("name", "")
-        tagline    = _e(dest.get("tagline", ""))
-        desc       = _e(dest.get("description", ""))
-        highlights = dest.get("highlights", [])
-        best_for   = _e(dest.get("best_for", ""))
-        cost_pp    = _e(dest.get("approx_cost_per_person", ""))
-        budget_fit = _e(dest.get("budget_fit", ""))
-        weather    = _e(dest.get("weather_in_month", ""))
-        travel_t   = _e(dest.get("travel_time_from_origin", ""))
-        images     = dest.get("images", [])
-
-        with col:
-            # Featured image
-            if images:
-                st.image(images[0], use_container_width=True)
-
-            # Highlights as tags
-            tag_html = "".join(
-                f'<span class="sugg-tag">⚡ {_e(h)}</span>' for h in highlights[:4]
-            )
-
-            st.markdown(f"""
-            <div class="sugg-body">
-                <span class="sugg-tagline-pill">{tagline}</span>
-                <div class="sugg-name">{_e(name)}</div>
-                <p class="sugg-desc">{desc}</p>
-                <div class="sugg-tags">{tag_html}</div>
-                <p class="sugg-bestfor">👥 Best for: {best_for}</p>
-                <div class="sugg-meta">
-                    <span class="sugg-pill sugg-pill-cost">💰 {cost_pp} per person</span>
-                    <span class="sugg-pill sugg-pill-budget">{budget_fit}</span>
-                </div>
-                <div class="sugg-meta">
-                    <span class="sugg-pill sugg-pill-weather">🌤 {weather}</span>
-                    <span class="sugg-pill sugg-pill-time">🚂 {travel_t}</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Extra photos if available
-            if len(images) > 1:
-                extra_cols = st.columns(min(len(images) - 1, 3))
-                for j, img in enumerate(images[1:4]):
-                    with extra_cols[j]:
-                        st.image(img, use_container_width=True)
-
-            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
-            if st.button(f"Plan my trip to {name} →", key=f"pick_{name}", use_container_width=True, type="primary"):
-                # Set the selected destination and kick off full planning
-                full_dest = f"{name}, {state}" if state != "India" else name
-                ctx.destination = full_dest
-                st.session_state.trip_context = ctx
-                # Clear old plan data
-                for k in ["plan", "all_images", "by_dest", "hotels_by_location",
-                          "sources", "transport", "availability", "booking_confirmed"]:
-                    st.session_state.pop(k, None)
-                st.session_state.page = "searching"
-                st.rerun()
-
+    st.markdown(f"**{len(dests)} places to choose from** — pick the one that excites you most.")
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("← Change trip details", use_container_width=False):
+
+    # Render in rows of 3
+    for row_start in range(0, len(dests), 3):
+        row_dests = dests[row_start: row_start + 3]
+        cols = st.columns(3)
+
+        for col, dest in zip(cols, row_dests):
+            name       = dest.get("name", "")
+            tagline    = _e(dest.get("tagline", ""))
+            desc       = _e(dest.get("description", ""))
+            highlights = dest.get("highlights", [])
+            best_for   = _e(dest.get("best_for", ""))
+            cost_pp    = _e(dest.get("approx_cost_per_person", ""))
+            budget_fit = _e(dest.get("budget_fit", ""))
+            weather    = _e(dest.get("weather_in_month", ""))
+            travel_t   = _e(dest.get("travel_time_from_origin", ""))
+            images     = dest.get("images", [])
+
+            with col:
+                if images:
+                    st.image(images[0], use_container_width=True)
+                else:
+                    st.markdown('<div style="height:210px;background:#f0f4ff;border-radius:12px;"></div>',
+                                unsafe_allow_html=True)
+
+                tag_html = "".join(
+                    f'<span class="sugg-tag">⚡ {_e(h)}</span>' for h in highlights[:3]
+                )
+                meta_html = ""
+                if cost_pp:
+                    meta_html += f'<span class="sugg-pill sugg-pill-cost">💰 {cost_pp}/person</span> '
+                if budget_fit:
+                    meta_html += f'<span class="sugg-pill sugg-pill-budget">{budget_fit}</span> '
+                if weather:
+                    meta_html += f'<br><span class="sugg-pill sugg-pill-weather">🌤 {weather}</span> '
+                if travel_t:
+                    meta_html += f'<span class="sugg-pill sugg-pill-time">🚂 {travel_t}</span>'
+
+                st.markdown(f"""
+                <div class="sugg-body">
+                    <span class="sugg-tagline-pill">{tagline}</span>
+                    <div class="sugg-name">{_e(name)}</div>
+                    <p class="sugg-desc">{desc}</p>
+                    <div class="sugg-tags">{tag_html}</div>
+                    <p class="sugg-bestfor">👥 {best_for}</p>
+                    <div class="sugg-meta" style="flex-wrap:wrap; gap:5px;">{meta_html}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if st.button(
+                    f"Plan trip to {name} →",
+                    key=f"pick_{name}",
+                    use_container_width=True,
+                    type="primary",
+                ):
+                    full_dest = f"{name}, {state}" if state != "India" else name
+                    ctx.destination = full_dest
+                    st.session_state.trip_context = ctx
+                    for k in ["plan", "all_images", "by_dest", "hotels_by_location",
+                              "sources", "transport", "availability", "booking_confirmed"]:
+                        st.session_state.pop(k, None)
+                    st.session_state.page = "searching"
+                    st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+    if st.button("← Change trip details"):
         st.session_state.page = "form"
         st.session_state.pop("suggestions", None)
         st.rerun()
