@@ -14,6 +14,7 @@ from groq import RateLimitError
 from travel_planner import orchestrator
 from travel_planner import availability_agent
 from travel_planner import booking_links as blinks
+from travel_planner.agents import suggest_destinations
 from travel_planner.india_data import STATE_NAMES, STATES, DEPARTURE_CITIES
 from travel_planner.models import TripContext
 
@@ -208,6 +209,46 @@ html, body, [class*="css"] { font-family: 'Poppins', sans-serif; }
     font-size: 1rem; font-weight: 600; font-style: italic;
     color: #fff; line-height: 1.35;
 }
+
+.sugg-header {
+    text-align: center; padding: 2rem 1rem 1.2rem;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%);
+    border-radius: 18px; margin-bottom: 1.6rem; color: #fff;
+}
+.sugg-header h2 { margin: 0 0 6px; font-size: 1.7rem; font-weight: 800; }
+.sugg-header p  { margin: 0; opacity: 0.8; font-size: 0.92rem; }
+
+.sugg-card {
+    border-radius: 18px; overflow: hidden; background: #fff;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.09);
+    border: 2px solid #f0f0f0;
+    margin-bottom: 1rem;
+    transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+}
+.sugg-card:hover { transform: translateY(-4px); box-shadow: 0 10px 36px rgba(102,126,234,0.18); border-color: #667eea; }
+.sugg-img { width: 100%; height: 210px; object-fit: cover; display: block; }
+.sugg-body { padding: 1.1rem 1.3rem 0.8rem; }
+.sugg-tagline-pill {
+    display: inline-block;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff; font-size: 0.68rem; font-weight: 800;
+    padding: 3px 10px; border-radius: 20px;
+    text-transform: uppercase; letter-spacing: 0.09em; margin-bottom: 6px;
+}
+.sugg-name { font-size: 1.45rem; font-weight: 800; color: #1a1a2e; margin: 3px 0 8px; }
+.sugg-desc { font-size: 0.85rem; color: #555; line-height: 1.58; margin-bottom: 10px; }
+.sugg-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+.sugg-tag  { background: #f0f4ff; color: #3730a3; font-size: 0.70rem; font-weight: 600; padding: 3px 9px; border-radius: 20px; }
+.sugg-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.sugg-pill {
+    font-size: 0.76rem; font-weight: 600; padding: 4px 11px;
+    border-radius: 20px; white-space: nowrap;
+}
+.sugg-pill-cost    { background: #ecfdf5; color: #065f46; }
+.sugg-pill-budget  { background: #eff6ff; color: #1d4ed8; }
+.sugg-pill-weather { background: #fff7ed; color: #c2410c; }
+.sugg-pill-time    { background: #fdf4ff; color: #6b21a8; }
+.sugg-bestfor { font-size: 0.78rem; color: #777; margin-bottom: 4px; }
 
 .avail-card {
     border-radius: 14px; padding: 1.1rem 1.3rem; margin-bottom: 10px;
@@ -416,12 +457,10 @@ def show_form():
         safe_from = from_city.strip()[:80]
         safe_state = selected_state if selected_state != "— Suggest the best destination for me —" else None
 
-        # Build full destination string with state for agent precision
+        # Destination string enriched with state context for agents
         full_dest = None
         if safe_dest:
             full_dest = f"{safe_dest}, {safe_state}" if safe_state else safe_dest
-        elif safe_state:
-            full_dest = None  # agents will suggest within state
 
         st.session_state.trip_context = TripContext(
             destination=full_dest,
@@ -436,7 +475,119 @@ def show_form():
             experience_type=experience,
             is_confirmed=True,
         )
-        st.session_state.page = "searching"
+        # No specific destination chosen → show suggestion cards first
+        st.session_state.pop("suggestions", None)
+        if full_dest is None:
+            st.session_state.page = "suggestions"
+        else:
+            st.session_state.page = "searching"
+        st.rerun()
+
+
+# ── SUGGESTIONS PAGE ──────────────────────────────────────────────────────────
+def show_suggestions():
+    ctx: TripContext = st.session_state.trip_context
+    state = ctx.state or "India"
+    n     = ctx.num_travelers or 2
+
+    st.markdown(f"""
+    <div class="sugg-header">
+        <h2>✨ Where in {state} should you go?</h2>
+        <p>We've picked 3 places that match your travel style, budget, and travel month.
+           Pick the one that excites you most — we'll build a full itinerary instantly.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Run suggester (cached in session so Back doesn't re-fetch)
+    if "suggestions" not in st.session_state or not st.session_state.suggestions:
+        with st.spinner(f"Finding the best places in {state} for you…"):
+            try:
+                dests = suggest_destinations(ctx)
+            except Exception as e:
+                st.error(f"Couldn't fetch suggestions ({type(e).__name__}). Please try again.")
+                if st.button("← Back to form"):
+                    st.session_state.page = "form"
+                    st.rerun()
+                return
+        st.session_state.suggestions = dests
+    else:
+        dests = st.session_state.suggestions
+
+    if not dests:
+        st.warning("No suggestions found. Try changing your interests or travel month.")
+        if st.button("← Back"):
+            st.session_state.page = "form"
+            st.rerun()
+        return
+
+    _e = html_lib.escape
+    cols = st.columns(len(dests))
+
+    for col, dest in zip(cols, dests):
+        name       = dest.get("name", "")
+        tagline    = _e(dest.get("tagline", ""))
+        desc       = _e(dest.get("description", ""))
+        highlights = dest.get("highlights", [])
+        best_for   = _e(dest.get("best_for", ""))
+        cost_pp    = _e(dest.get("approx_cost_per_person", ""))
+        budget_fit = _e(dest.get("budget_fit", ""))
+        weather    = _e(dest.get("weather_in_month", ""))
+        travel_t   = _e(dest.get("travel_time_from_origin", ""))
+        images     = dest.get("images", [])
+
+        with col:
+            # Featured image
+            if images:
+                st.image(images[0], use_container_width=True)
+
+            # Highlights as tags
+            tag_html = "".join(
+                f'<span class="sugg-tag">⚡ {_e(h)}</span>' for h in highlights[:4]
+            )
+
+            st.markdown(f"""
+            <div class="sugg-body">
+                <span class="sugg-tagline-pill">{tagline}</span>
+                <div class="sugg-name">{_e(name)}</div>
+                <p class="sugg-desc">{desc}</p>
+                <div class="sugg-tags">{tag_html}</div>
+                <p class="sugg-bestfor">👥 Best for: {best_for}</p>
+                <div class="sugg-meta">
+                    <span class="sugg-pill sugg-pill-cost">💰 {cost_pp} per person</span>
+                    <span class="sugg-pill sugg-pill-budget">{budget_fit}</span>
+                </div>
+                <div class="sugg-meta">
+                    <span class="sugg-pill sugg-pill-weather">🌤 {weather}</span>
+                    <span class="sugg-pill sugg-pill-time">🚂 {travel_t}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Extra photos if available
+            if len(images) > 1:
+                extra_cols = st.columns(min(len(images) - 1, 3))
+                for j, img in enumerate(images[1:4]):
+                    with extra_cols[j]:
+                        st.image(img, use_container_width=True)
+
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+            if st.button(f"Plan my trip to {name} →", key=f"pick_{name}", use_container_width=True, type="primary"):
+                # Set the selected destination and kick off full planning
+                full_dest = f"{name}, {state}" if state != "India" else name
+                ctx.destination = full_dest
+                st.session_state.trip_context = ctx
+                # Clear old plan data
+                for k in ["plan", "all_images", "by_dest", "hotels_by_location",
+                          "sources", "transport", "availability", "booking_confirmed"]:
+                    st.session_state.pop(k, None)
+                st.session_state.page = "searching"
+                st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("← Change trip details", use_container_width=False):
+        st.session_state.page = "form"
+        st.session_state.pop("suggestions", None)
         st.rerun()
 
 
@@ -920,7 +1071,7 @@ def show_results():
         if st.button("✈️  Plan Another Trip", use_container_width=True):
             for key in ["page", "plan", "all_images", "by_dest",
                         "trip_context", "hotels_by_location", "sources",
-                        "availability", "booking_confirmed"]:
+                        "availability", "booking_confirmed", "suggestions"]:
                 st.session_state.pop(key, None)
             st.rerun()
 
@@ -1112,6 +1263,8 @@ def show_booking():
 # ── Router ────────────────────────────────────────────────────────────────────
 if st.session_state.page == "form":
     show_form()
+elif st.session_state.page == "suggestions":
+    show_suggestions()
 elif st.session_state.page == "searching":
     show_searching()
 elif st.session_state.page == "results":
