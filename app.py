@@ -9,9 +9,12 @@ for _key in ["GROQ_API_KEY", "TAVILY_API_KEY"]:
     if not os.environ.get(_key) and _key in st.secrets:
         os.environ[_key] = st.secrets[_key]
 
+import html as html_lib
 from groq import RateLimitError
 from travel_planner import orchestrator
+from travel_planner import availability_agent
 from travel_planner import booking_links as blinks
+from travel_planner.india_data import STATE_NAMES, STATES, DEPARTURE_CITIES
 from travel_planner.models import TripContext
 
 st.set_page_config(page_title="India Travel Planner", page_icon="✈️", layout="wide")
@@ -206,6 +209,51 @@ html, body, [class*="css"] { font-family: 'Poppins', sans-serif; }
     color: #fff; line-height: 1.35;
 }
 
+.avail-card {
+    border-radius: 14px; padding: 1.1rem 1.3rem; margin-bottom: 10px;
+    border-left: 5px solid #ccc; background: #fafafa;
+}
+.avail-card.ok      { border-color: #22c55e; background: #f0fdf4; }
+.avail-card.warning { border-color: #f59e0b; background: #fffbeb; }
+.avail-card.error   { border-color: #ef4444; background: #fef2f2; }
+.avail-icon { font-size: 1.4rem; float: left; margin-right: 10px; line-height: 1.2; }
+.avail-title { font-weight: 700; font-size: 0.95rem; color: #1a1a2e; margin-bottom: 2px; }
+.avail-status { font-size: 0.82rem; font-weight: 600; margin-bottom: 4px; }
+.avail-status.ok      { color: #16a34a; }
+.avail-status.warning { color: #d97706; }
+.avail-status.error   { color: #dc2626; }
+.avail-note { font-size: 0.8rem; color: #555; line-height: 1.45; margin: 0; }
+.booking-summary-header {
+    text-align: center; padding: 1.5rem 0 1rem;
+    background: linear-gradient(135deg, #1a1a2e, #0f3460);
+    border-radius: 16px; margin-bottom: 1.5rem;
+    color: #fff;
+}
+.booking-confirm-btn {
+    display: block; width: 100%; text-align: center;
+    padding: 14px; border-radius: 12px; font-size: 1.05rem; font-weight: 800;
+    text-decoration: none; color: #fff; cursor: pointer;
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    border: none; margin-top: 8px;
+}
+.booking-warn-btn {
+    display: block; width: 100%; text-align: center;
+    padding: 14px; border-radius: 12px; font-size: 1.05rem; font-weight: 800;
+    text-decoration: none; color: #fff; cursor: pointer;
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    border: none; margin-top: 8px;
+}
+.book-all-section { background: #f8fafc; border-radius: 16px; padding: 1.5rem; margin-top: 1rem; }
+.book-all-category { font-size: 0.78rem; font-weight: 800; text-transform: uppercase;
+                     letter-spacing: 0.12em; color: #888; margin: 1rem 0 6px; }
+.book-package-cta {
+    text-align: center; padding: 1.4rem 1rem;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border-radius: 16px; margin: 1rem 0;
+}
+.book-package-cta h3 { color: #fff; margin: 0 0 4px; font-size: 1.1rem; font-weight: 700; }
+.book-package-cta p  { color: rgba(255,255,255,0.82); margin: 0; font-size: 0.85rem; }
+
 .book-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px 0; }
 .book-btn {
     display: inline-block; padding: 5px 13px;
@@ -306,14 +354,31 @@ def show_form():
 
     with st.form("trip_form"):
         st.markdown("#### Where & When")
+
         c1, c2 = st.columns(2)
         with c1:
-            destination = st.text_input(
-                "🗺️ Destination",
-                placeholder="Rajasthan, Goa, Kerala… (leave blank for suggestions)",
-            )
+            state_options = ["— Suggest the best destination for me —"] + STATE_NAMES
+            selected_state = st.selectbox("🗺️ State / Region *", state_options)
         with c2:
-            from_city = st.text_input("🏠 Departing from *", placeholder="Mumbai, Delhi, Bangalore…")
+            from_city = st.selectbox(
+                "🏠 Departing from *",
+                ["— Select city —"] + DEPARTURE_CITIES,
+            )
+
+        # Destination field — shown only when a state is selected
+        destination = None
+        if selected_state != "— Suggest the best destination for me —":
+            places = STATES.get(selected_state, [])
+            place_options = ["— Suggest best place in this state —"] + places + ["Other (type below)"]
+            chosen_place = st.selectbox(f"📍 Place in {selected_state}", place_options)
+            if chosen_place == "Other (type below)":
+                destination = st.text_input(
+                    f"Type your destination in {selected_state}",
+                    placeholder=f"Enter a specific place in {selected_state}, India",
+                    max_chars=80,
+                )
+            elif chosen_place != "— Suggest best place in this state —":
+                destination = chosen_place
 
         c3, c4, c5 = st.columns(3)
         with c3:
@@ -343,12 +408,25 @@ def show_form():
         submitted = st.form_submit_button("🔍  Find My Perfect Trip", use_container_width=True)
 
     if submitted:
-        if not from_city.strip():
-            st.error("Please enter your departure city.")
+        if from_city == "— Select city —":
+            st.error("Please select your departure city.")
             return
+        # Sanitize free-text inputs (max 80 chars, strip tags)
+        safe_dest = (destination or "").strip()[:80] if destination else None
+        safe_from = from_city.strip()[:80]
+        safe_state = selected_state if selected_state != "— Suggest the best destination for me —" else None
+
+        # Build full destination string with state for agent precision
+        full_dest = None
+        if safe_dest:
+            full_dest = f"{safe_dest}, {safe_state}" if safe_state else safe_dest
+        elif safe_state:
+            full_dest = None  # agents will suggest within state
+
         st.session_state.trip_context = TripContext(
-            destination=destination.strip() or None,
-            starting_city=from_city.strip(),
+            destination=full_dest,
+            state=safe_state,
+            starting_city=safe_from,
             travel_month=travel_month,
             duration_days=int(duration),
             num_travelers=int(num_travelers),
@@ -538,10 +616,15 @@ def show_results():
 
     # ── Stat cards ────────────────────────────────────────────────────────────
     s1, s2, s3, s4 = st.columns(4)
+    # html_lib.escape prevents XSS from user-supplied text in HTML context
+    _e = html_lib.escape
+    dest_label = _e(ctx.destination or (f"{ctx.state}" if ctx.state else "India"))
     for col, (icon, label, val), grad, tc in zip(
         [s1, s2, s3, s4],
-        [("📍","From",ctx.starting_city),("⏱️","Duration",f"{ctx.duration_days} days"),
-         ("👥","Travelers",f"{ctx.num_travelers} ({ctx.traveler_type})"),("💰","Budget",f"₹{ctx.budget_total:,}")],
+        [("📍","From", _e(ctx.starting_city or "")),
+         ("⏱️","Duration",f"{ctx.duration_days} days"),
+         ("👥","Travelers",f"{ctx.num_travelers} ({_e(ctx.traveler_type or '')})"),
+         ("💰","Budget",f"₹{ctx.budget_total:,}")],
         ["linear-gradient(135deg,#667eea,#764ba2)","linear-gradient(135deg,#f7971e,#ffd200)",
          "linear-gradient(135deg,#4facfe,#00f2fe)","linear-gradient(135deg,#43e97b,#38f9d7)"],
         ["white","#1a1a2e","white","#1a1a2e"],
@@ -549,7 +632,9 @@ def show_results():
         with col:
             st.markdown(f'<div class="stat-card" style="background:{grad}; color:{tc};"><div class="icon">{icon}</div><div class="label">{label}</div><div class="value">{val}</div></div>', unsafe_allow_html=True)
 
-    if plan is None:
+    plan_ok = bool(plan and (plan.get("destinations") or plan.get("itinerary")))
+
+    if not plan_ok:
         if images:
             st.markdown('<div class="section-title">📸 Trip Photos</div>', unsafe_allow_html=True)
             gcols = st.columns(4)
@@ -564,11 +649,26 @@ def show_results():
         with mid:
             if st.button("🔄  Try Again", use_container_width=True):
                 for key in ["plan", "plan_text", "all_images", "by_dest",
-                            "hotels_by_location", "sources"]:
+                            "hotels_by_location", "sources", "availability"]:
                     st.session_state.pop(key, None)
                 st.session_state.page = "searching"
                 st.rerun()
     else:
+        # ── Book Complete Package CTA ─────────────────────────────────────────
+        st.markdown("""
+        <div class="book-package-cta">
+            <h3>🎯 Ready to lock this trip in?</h3>
+            <p>We'll do a live availability check, then walk you through booking everything — flights, trains, hotels and vehicles — in one go.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        _, cta_col, _ = st.columns([1, 2, 1])
+        with cta_col:
+            if st.button("🔒 Book Complete Package", use_container_width=True, type="primary"):
+                st.session_state.pop("availability", None)
+                st.session_state.pop("booking_confirmed", None)
+                st.session_state.page = "booking"
+                st.rerun()
+
         # ── Destinations ──────────────────────────────────────────────────────
         destinations = plan.get("destinations", [])
         if destinations:
@@ -819,9 +919,194 @@ def show_results():
     with mid:
         if st.button("✈️  Plan Another Trip", use_container_width=True):
             for key in ["page", "plan", "all_images", "by_dest",
-                        "trip_context", "hotels_by_location", "sources"]:
+                        "trip_context", "hotels_by_location", "sources",
+                        "availability", "booking_confirmed"]:
                 st.session_state.pop(key, None)
             st.rerun()
+
+
+# ── BOOKING CONFIRMATION PAGE ─────────────────────────────────────────────────
+def show_booking():
+    ctx: TripContext     = st.session_state.trip_context
+    transport: dict      = st.session_state.get("transport", {})
+    hotels: dict         = st.session_state.get("hotels_by_location", {})
+    plan: dict           = st.session_state.get("plan", {})
+
+    st.markdown("""
+    <div class="booking-summary-header">
+        <h2 style="margin:0 0 4px; font-size:1.6rem;">🔒 Complete Package Booking</h2>
+        <p style="margin:0; opacity:0.82; font-size:0.92rem;">We're checking live availability for every part of your trip</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Run availability check (cached so clicking Confirm doesn't re-run) ──
+    if "availability" not in st.session_state:
+        with st.spinner("Checking live flight, train, hotel & vehicle availability…"):
+            try:
+                avail = availability_agent.check(ctx, transport, hotels)
+            except Exception as e:
+                avail = {
+                    "overall": "some_changes",
+                    "flight":  {"flag": "warning", "status": "Could not verify", "note": str(e)[:120]},
+                    "train":   {"flag": "warning", "status": "Could not verify", "note": "Please check manually."},
+                    "vehicle": {"flag": "warning", "status": "Could not verify", "note": "Please check manually."},
+                    "hotels":  {c: {"flag": "warning", "status": "Could not verify", "note": "Please check manually."} for c in hotels},
+                }
+        st.session_state.availability = avail
+    else:
+        avail = st.session_state.availability
+
+    overall = avail.get("overall", "some_changes")
+    FLAG_ICON = {"ok": "✅", "warning": "⚠️", "error": "❌"}
+    FLAG_LABEL = {"ok": "Available", "warning": "Check needed", "error": "Unavailable"}
+
+    def _avail_card(title: str, component: dict) -> None:
+        flag  = component.get("flag", "warning")
+        icon  = FLAG_ICON.get(flag, "⚠️")
+        label = FLAG_LABEL.get(flag, flag)
+        status = component.get("status", "")
+        note   = component.get("note", "")
+        st.markdown(f"""
+        <div class="avail-card {flag}">
+            <span class="avail-icon">{icon}</span>
+            <div class="avail-title">{title}</div>
+            <div class="avail-status {flag}">{label} — {status}</div>
+            <p class="avail-note">{note}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("### Availability Status")
+
+    # Flight
+    flight_opts = transport.get("flight", {}).get("options", [])
+    if flight_opts:
+        best_f = flight_opts[0]
+        _avail_card(
+            f"✈️  Flight — {best_f.get('airlines','')}  {best_f.get('route','')} ({best_f.get('cost_per_person','?')}/person)",
+            avail.get("flight", {"flag": "warning", "status": "Not checked", "note": ""}),
+        )
+
+    # Train
+    train_opts = transport.get("train", {}).get("options", [])
+    if train_opts:
+        best_t = train_opts[0]
+        _avail_card(
+            f"🚂  Train — {best_t.get('name','')} {best_t.get('number','')} (3AC: {best_t.get('third_ac','?')})",
+            avail.get("train", {"flag": "warning", "status": "Not checked", "note": ""}),
+        )
+
+    # Vehicle
+    vehicle_opts = transport.get("vehicle", {}).get("options", [])
+    if vehicle_opts:
+        best_v = vehicle_opts[0]
+        _avail_card(
+            f"🚗  Vehicle — {best_v.get('vehicle_type','')} ({best_v.get('total_estimate','?')})",
+            avail.get("vehicle", {"flag": "warning", "status": "Not checked", "note": ""}),
+        )
+
+    # Hotels per city
+    avail_hotels = avail.get("hotels", {})
+    for city, city_hotels in hotels.items():
+        if city_hotels:
+            h = city_hotels[0]
+            hotel_avail = avail_hotels.get(city, {"flag": "warning", "status": "Not checked", "note": ""})
+            _avail_card(
+                f"🏨  {city} — {h.get('name','')} {h.get('type','')} ({h.get('price_per_night','?')}/night)",
+                hotel_avail,
+            )
+
+    # ── Overall status banner ────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    has_errors   = any(
+        v.get("flag") == "error"
+        for v in [avail.get("flight",{}), avail.get("train",{}), avail.get("vehicle",{})]
+        + list(avail.get("hotels",{}).values())
+    )
+    has_warnings = overall != "all_clear"
+
+    if overall == "all_clear":
+        st.success("✅ All components look available! You're good to book.")
+    elif has_errors:
+        st.error("❌ One or more components appear unavailable. We recommend cancelling and replanning.")
+    else:
+        st.warning("⚠️ Some prices or availability may have changed. Review the details above before proceeding.")
+
+    # ── Action buttons ────────────────────────────────────────────────────────
+    if not st.session_state.get("booking_confirmed"):
+        bcol1, bcol2 = st.columns(2)
+        with bcol1:
+            if st.button("← Back to Plan", use_container_width=True):
+                st.session_state.page = "results"
+                st.rerun()
+        with bcol2:
+            if has_errors:
+                st.button("❌ Cannot Book — Replan", use_container_width=True, disabled=True)
+            elif has_warnings:
+                if st.button("⚠️ Proceed Anyway — Book All", use_container_width=True):
+                    st.session_state.booking_confirmed = True
+                    st.rerun()
+            else:
+                if st.button("✅ Confirm — Book All Now", use_container_width=True, type="primary"):
+                    st.session_state.booking_confirmed = True
+                    st.rerun()
+
+    # ── Booking links (shown after confirmation) ──────────────────────────────
+    if st.session_state.get("booking_confirmed"):
+        st.markdown("---")
+        st.markdown("""
+        <div style="text-align:center; margin-bottom:1rem;">
+            <h3 style="color:#1a1a2e;">🎉 You're confirmed! Open each link to complete your booking.</h3>
+            <p style="color:#666; font-size:0.9rem;">📌 Tip: Book in order — Flights first, then Train, then Hotels. If any step fails, hold off on the others.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        dest = ctx.destination or ""
+        n    = ctx.num_travelers or 2
+
+        with st.container():
+            # Flight links
+            if flight_opts:
+                st.markdown('<p class="book-all-category">Step 1 — Flights</p>', unsafe_allow_html=True)
+                f_links = blinks.flight_links(ctx)
+                cols = st.columns(len(f_links))
+                for i, lnk in enumerate(f_links):
+                    with cols[i]:
+                        st.link_button(f"✈️ {lnk['label']}", lnk["url"], use_container_width=True)
+
+            # Train links
+            if train_opts:
+                st.markdown('<p class="book-all-category">Step 2 — Train</p>', unsafe_allow_html=True)
+                t_links = blinks.train_links(ctx)
+                cols = st.columns(len(t_links))
+                for i, lnk in enumerate(t_links):
+                    with cols[i]:
+                        st.link_button(f"🚂 {lnk['label']}", lnk["url"], use_container_width=True)
+
+            # Hotel links per city
+            for city in hotels:
+                st.markdown(f'<p class="book-all-category">Step 3 — Hotel in {city}</p>', unsafe_allow_html=True)
+                h_links = blinks.hotel_links(ctx, city)
+                cols = st.columns(len(h_links))
+                for i, lnk in enumerate(h_links):
+                    with cols[i]:
+                        st.link_button(f"🏨 {lnk['label']}", lnk["url"], use_container_width=True)
+
+            # Vehicle links
+            if vehicle_opts:
+                st.markdown('<p class="book-all-category">Step 4 — Vehicle (Optional)</p>', unsafe_allow_html=True)
+                v_links = blinks.vehicle_links(ctx)
+                cols = st.columns(len(v_links))
+                for i, lnk in enumerate(v_links):
+                    with cols[i]:
+                        st.link_button(f"🚗 {lnk['label']}", lnk["url"], use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        _, back_col, _ = st.columns([1, 2, 1])
+        with back_col:
+            if st.button("← Back to Plan Details", use_container_width=True):
+                st.session_state.booking_confirmed = False
+                st.session_state.page = "results"
+                st.rerun()
 
 
 # ── Router ────────────────────────────────────────────────────────────────────
@@ -831,3 +1116,5 @@ elif st.session_state.page == "searching":
     show_searching()
 elif st.session_state.page == "results":
     show_results()
+elif st.session_state.page == "booking":
+    show_booking()

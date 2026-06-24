@@ -23,6 +23,7 @@ class TripContext:
 
     # Preferences (soft)
     destination: Optional[str] = None  # None = unknown, agent will suggest
+    state: Optional[str] = None        # Indian state / UT (scope limiting)
     experience_type: List[str] = field(default_factory=list)
     travel_mode: Optional[str] = None  # train / flight / road / mixed
     constraints: List[str] = field(default_factory=list)
@@ -83,6 +84,7 @@ class TripContext:
                 "kids_ages": self.kids_ages,
                 "has_elderly": self.has_elderly,
                 "destination": self.destination,
+                "state": self.state,
                 "experience_type": self.experience_type,
                 "travel_mode": self.travel_mode,
                 "constraints": self.constraints,
