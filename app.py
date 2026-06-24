@@ -9,9 +9,9 @@ for _key in ["GROQ_API_KEY", "TAVILY_API_KEY"]:
     if not os.environ.get(_key) and _key in st.secrets:
         os.environ[_key] = st.secrets[_key]
 
-import html as html_lib
 from groq import RateLimitError
 from travel_planner import orchestrator
+from travel_planner.guards import esc, safe_url
 from travel_planner import availability_agent
 from travel_planner import booking_links as blinks
 from travel_planner.agents import suggest_destinations
@@ -520,7 +520,6 @@ def show_suggestions():
             st.rerun()
         return
 
-    _e = html_lib.escape
     st.markdown(f"**{len(dests)} places to choose from** — pick the one that excites you most.")
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -531,14 +530,14 @@ def show_suggestions():
 
         for col, dest in zip(cols, row_dests):
             name       = dest.get("name", "")
-            tagline    = _e(dest.get("tagline", ""))
-            desc       = _e(dest.get("description", ""))
+            tagline    = esc(dest.get("tagline", ""))
+            desc       = esc(dest.get("description", ""))
             highlights = dest.get("highlights", [])
-            best_for   = _e(dest.get("best_for", ""))
-            cost_pp    = _e(dest.get("approx_cost_per_person", ""))
-            budget_fit = _e(dest.get("budget_fit", ""))
-            weather    = _e(dest.get("weather_in_month", ""))
-            travel_t   = _e(dest.get("travel_time_from_origin", ""))
+            best_for   = esc(dest.get("best_for", ""))
+            cost_pp    = esc(dest.get("approx_cost_per_person", ""))
+            budget_fit = esc(dest.get("budget_fit", ""))
+            weather    = esc(dest.get("weather_in_month", ""))
+            travel_t   = esc(dest.get("travel_time_from_origin", ""))
             images     = dest.get("images", [])
 
             with col:
@@ -549,7 +548,7 @@ def show_suggestions():
                                 unsafe_allow_html=True)
 
                 tag_html = "".join(
-                    f'<span class="sugg-tag">⚡ {_e(h)}</span>' for h in highlights[:3]
+                    f'<span class="sugg-tag">⚡ {esc(h)}</span>' for h in highlights[:3]
                 )
                 meta_html = ""
                 if cost_pp:
@@ -564,7 +563,7 @@ def show_suggestions():
                 st.markdown(f"""
                 <div class="sugg-body">
                     <span class="sugg-tagline-pill">{tagline}</span>
-                    <div class="sugg-name">{_e(name)}</div>
+                    <div class="sugg-name">{esc(name)}</div>
                     <p class="sugg-desc">{desc}</p>
                     <div class="sugg-tags">{tag_html}</div>
                     <p class="sugg-bestfor">👥 {best_for}</p>
@@ -699,8 +698,8 @@ def show_results():
         if not valid:
             return
         chips = "".join(
-            f'<a class="source-chip" href="{s["url"]}" target="_blank" rel="noopener noreferrer">'
-            f'🔗 {s["title"][:55]}{"…" if len(s["title"]) > 55 else ""}</a>'
+            f'<a class="source-chip" href="{safe_url(s["url"])}" target="_blank" rel="noopener noreferrer">'
+            f'🔗 {esc(s["title"][:55])}{"…" if len(s["title"]) > 55 else ""}</a>'
             for s in valid
         )
         st.markdown(
@@ -713,8 +712,8 @@ def show_results():
         if not links:
             return
         btns = "".join(
-            f'<a class="book-btn" href="{lnk["url"]}" target="_blank" rel="noopener noreferrer">'
-            f'{lnk["label"]}</a>'
+            f'<a class="book-btn" href="{safe_url(lnk["url"])}" target="_blank" rel="noopener noreferrer">'
+            f'{esc(lnk["label"])}</a>'
             for lnk in links
         )
         st.markdown(
@@ -740,15 +739,15 @@ def show_results():
             name, tagline = dest_taglines[0]
             st.markdown(f"""
             <div class="hero-tagline-single">
-                <div class="hero-dest-name">✦ {name} ✦</div>
-                <div class="hero-tagline-text">{tagline}</div>
+                <div class="hero-dest-name">✦ {esc(name)} ✦</div>
+                <div class="hero-tagline-text">{esc(tagline)}</div>
             </div>
             """, unsafe_allow_html=True)
         else:
             cards = "".join(
                 f'<div class="dest-tag-card">'
-                f'<div class="dtc-name">✦ {name} ✦</div>'
-                f'<div class="dtc-line">{tagline}</div>'
+                f'<div class="dtc-name">✦ {esc(name)} ✦</div>'
+                f'<div class="dtc-line">{esc(tagline)}</div>'
                 f'</div>'
                 for name, tagline in dest_taglines
             )
@@ -764,21 +763,19 @@ def show_results():
 
     st.markdown(f"""
     <div style="text-align:center; padding:1.5rem 0 0.5rem;">
-        <h1 style="font-size:2.4rem; font-weight:800; color:#1a1a2e; margin:0;">{title}</h1>
-        <p style="font-size:1rem; color:#555; max-width:700px; margin:0.7rem auto 0; line-height:1.65;">{overview}</p>
+        <h1 style="font-size:2.4rem; font-weight:800; color:#1a1a2e; margin:0;">{esc(title)}</h1>
+        <p style="font-size:1rem; color:#555; max-width:700px; margin:0.7rem auto 0; line-height:1.65;">{esc(overview)}</p>
     </div>
     """, unsafe_allow_html=True)
 
     # ── Stat cards ────────────────────────────────────────────────────────────
     s1, s2, s3, s4 = st.columns(4)
-    # html_lib.escape prevents XSS from user-supplied text in HTML context
-    _e = html_lib.escape
-    dest_label = _e(ctx.destination or (f"{ctx.state}" if ctx.state else "India"))
+    dest_label = esc(ctx.destination or (f"{ctx.state}" if ctx.state else "India"))
     for col, (icon, label, val), grad, tc in zip(
         [s1, s2, s3, s4],
-        [("📍","From", _e(ctx.starting_city or "")),
+        [("📍","From", esc(ctx.starting_city or "")),
          ("⏱️","Duration",f"{ctx.duration_days} days"),
-         ("👥","Travelers",f"{ctx.num_travelers} ({_e(ctx.traveler_type or '')})"),
+         ("👥","Travelers",f"{ctx.num_travelers} ({esc(ctx.traveler_type or '')})"),
          ("💰","Budget",f"₹{ctx.budget_total:,}")],
         ["linear-gradient(135deg,#667eea,#764ba2)","linear-gradient(135deg,#f7971e,#ffd200)",
          "linear-gradient(135deg,#4facfe,#00f2fe)","linear-gradient(135deg,#43e97b,#38f9d7)"],
@@ -845,28 +842,28 @@ def show_results():
 
                     history_html = ""
                     if dest.get("history"):
-                        history_html = f'<div class="history-block">📜 {dest["history"]}</div>'
+                        history_html = f'<div class="history-block">📜 {esc(dest["history"])}</div>'
 
                     facts_html = "".join(
-                        f'<span class="fact-tag">⚡ {f}</span>'
+                        f'<span class="fact-tag">⚡ {esc(f)}</span>'
                         for f in dest.get("unique_facts", [])[:3]
                     )
                     activities_html = "".join(
-                        f'<span class="activity-tag">🎯 {a}</span>'
+                        f'<span class="activity-tag">🎯 {esc(a)}</span>'
                         for a in dest.get("fun_activities", [])[:4]
                     )
                     highlights_html = "".join(
-                        f'<span class="highlight-tag">✦ {h}</span>'
+                        f'<span class="highlight-tag">✦ {esc(h)}</span>'
                         for h in dest.get("highlights", [])[:4]
                     )
-                    cost_html = (f'<p style="color:#43e97b; font-weight:600; font-size:0.85rem; margin:8px 0 0;">💰 {dest["estimated_cost"]}</p>'
+                    cost_html = (f'<p style="color:#43e97b; font-weight:600; font-size:0.85rem; margin:8px 0 0;">💰 {esc(dest["estimated_cost"])}</p>'
                                  if dest.get("estimated_cost") else "")
 
                     st.markdown(f"""
                     <div class="dest-card">
-                        <h3>{dest_name}</h3>
-                        <p class="tagline">{dest.get("tagline","")}</p>
-                        <p class="desc">{dest.get("description","")}</p>
+                        <h3>{esc(dest_name)}</h3>
+                        <p class="tagline">{esc(dest.get("tagline",""))}</p>
+                        <p class="desc">{esc(dest.get("description",""))}</p>
                         {history_html}
                         <div style="margin-bottom:6px;">{facts_html}</div>
                         <div style="margin-bottom:6px;">{activities_html}</div>
@@ -901,7 +898,7 @@ def show_results():
 
             for day in itinerary:
                 fun_highlight = day.get("fun_highlight", "")
-                fh_html = (f'<div class="fun-highlight">⭐ {fun_highlight}</div>' if fun_highlight else "")
+                fh_html = (f'<div class="fun-highlight">⭐ {esc(fun_highlight)}</div>' if fun_highlight else "")
 
                 morning = day.get("morning", "")
                 afternoon = day.get("afternoon", "")
@@ -912,22 +909,22 @@ def show_results():
                 if morning or afternoon or evening:
                     time_html = ""
                     if morning:
-                        time_html += f'<div class="time-section"><div class="time-label" style="color:#f7971e;">🌅 Morning</div><div class="time-content">{morning}</div></div>'
+                        time_html += f'<div class="time-section"><div class="time-label" style="color:#f7971e;">🌅 Morning</div><div class="time-content">{esc(morning)}</div></div>'
                     if afternoon:
-                        time_html += f'<div class="time-section"><div class="time-label" style="color:#4facfe;">☀️ Afternoon</div><div class="time-content">{afternoon}</div></div>'
+                        time_html += f'<div class="time-section"><div class="time-label" style="color:#4facfe;">☀️ Afternoon</div><div class="time-content">{esc(afternoon)}</div></div>'
                     if evening:
-                        time_html += f'<div class="time-section"><div class="time-label" style="color:#764ba2;">🌙 Evening</div><div class="time-content">{evening}</div></div>'
+                        time_html += f'<div class="time-section"><div class="time-label" style="color:#764ba2;">🌙 Evening</div><div class="time-content">{esc(evening)}</div></div>'
                 else:
-                    acts_html = "".join(f"<li>{a}</li>" for a in activities)
+                    acts_html = "".join(f"<li>{esc(a)}</li>" for a in activities)
                     time_html = f'<ul style="color:#444; font-size:0.88rem; padding-left:18px; margin:0;">{acts_html}</ul>'
 
-                stay_html = (f'<p class="stay-line">🏨 Tonight: {day["stay"]}</p>' if day.get("stay") else "")
+                stay_html = (f'<p class="stay-line">🏨 Tonight: {esc(day["stay"])}</p>' if day.get("stay") else "")
 
                 st.markdown(f"""
                 <div class="day-card">
-                    <span class="day-badge">Day {day.get("day","")}</span>
-                    <h4>{day.get("title","")}</h4>
-                    <p class="day-loc">📍 {day.get("location","")}</p>
+                    <span class="day-badge">Day {esc(day.get("day",""))}</span>
+                    <h4>{esc(day.get("title",""))}</h4>
+                    <p class="day-loc">📍 {esc(day.get("location",""))}</p>
                     {fh_html}
                     {time_html}
                     {stay_html}
@@ -950,17 +947,17 @@ def show_results():
                 with col:
                     best = options[0]
                     details_html = "".join(
-                        f'<p class="transport-detail"><b>{k.replace("_"," ").title()}:</b> {v}</p>'
+                        f'<p class="transport-detail"><b>{esc(k.replace("_"," ").title())}:</b> {esc(str(v))}</p>'
                         for k, v in best.items()
                         if k not in {cost_key, "booking_tip"} and v
                     )
-                    tip_html = (f'<div class="transport-tip">💡 {best["booking_tip"]}</div>'
+                    tip_html = (f'<div class="transport-tip">💡 {esc(best["booking_tip"])}</div>'
                                 if best.get("booking_tip") else "")
                     st.markdown(f"""
                     <div class="transport-mode-card" style="border-top:4px solid {border_color};">
                         <div class="transport-mode-icon">{icon}</div>
                         <div class="transport-mode-title">{title}</div>
-                        <div class="transport-cost" style="color:{cost_color};">{best.get(cost_key,"")}</div>
+                        <div class="transport-cost" style="color:{cost_color};">{esc(best.get(cost_key,""))}</div>
                         {details_html}{tip_html}
                     </div>
                     """, unsafe_allow_html=True)
@@ -970,16 +967,16 @@ def show_results():
                     # Additional options
                     for opt in options[1:]:
                         alt_details = "".join(
-                            f'<p class="transport-detail"><b>{k.replace("_"," ").title()}:</b> {v}</p>'
+                            f'<p class="transport-detail"><b>{esc(k.replace("_"," ").title())}:</b> {esc(str(v))}</p>'
                             for k, v in opt.items()
                             if k not in {cost_key, "booking_tip"} and v
                         )
-                        alt_tip = (f'<div class="transport-tip">💡 {opt["booking_tip"]}</div>'
+                        alt_tip = (f'<div class="transport-tip">💡 {esc(opt["booking_tip"])}</div>'
                                    if opt.get("booking_tip") else "")
                         st.markdown(f"""
                         <div class="transport-mode-card" style="border-top:2px solid {border_color}; margin-top:8px; opacity:0.85;">
                             <div class="transport-mode-title" style="font-size:0.88rem;">Alternative</div>
-                            <div class="transport-cost" style="color:{cost_color}; font-size:1.1rem;">{opt.get(cost_key,"")}</div>
+                            <div class="transport-cost" style="color:{cost_color}; font-size:1.1rem;">{esc(opt.get(cost_key,""))}</div>
                             {alt_details}{alt_tip}
                         </div>
                         """, unsafe_allow_html=True)
@@ -1010,22 +1007,22 @@ def show_results():
                 city_hotels = hotels_by_location.get(city, [])
                 if not city_hotels:
                     continue
-                st.markdown(f'<div class="hotel-city-header">📍 {city}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="hotel-city-header">📍 {esc(city)}</div>', unsafe_allow_html=True)
                 hcols = st.columns(min(len(city_hotels), 3))
                 for i, hotel in enumerate(city_hotels[:3]):
                     htype = hotel.get("type", "")
                     badge_cls = badge_class.get(htype, "badge-budget")
-                    why_html = (f'<p class="why-pick">"{hotel["why_pick"]}"</p>'
+                    why_html = (f'<p class="why-pick">"{esc(hotel["why_pick"])}"</p>'
                                 if hotel.get("why_pick") else "")
-                    rating_html = (f'<span style="color:#f7971e; font-weight:600; font-size:0.82rem;">★ {hotel["rating"]}</span>'
+                    rating_html = (f'<span style="color:#f7971e; font-weight:600; font-size:0.82rem;">★ {esc(hotel["rating"])}</span>'
                                    if hotel.get("rating") else "")
                     with hcols[i]:
                         st.markdown(f"""
                         <div class="hotel-card">
-                            <span class="hotel-type-badge {badge_cls}">{htype}</span>
-                            <h4>{hotel.get("name","")}</h4>
-                            <p class="hotel-meta">📍 {city} &nbsp; {rating_html}</p>
-                            <div class="hotel-price">{hotel.get("price_per_night","")} <span>/ night</span></div>
+                            <span class="hotel-type-badge {badge_cls}">{esc(htype)}</span>
+                            <h4>{esc(hotel.get("name",""))}</h4>
+                            <p class="hotel-meta">📍 {esc(city)} &nbsp; {rating_html}</p>
+                            <div class="hotel-price">{esc(hotel.get("price_per_night",""))} <span>/ night</span></div>
                             {why_html}
                         </div>
                         """, unsafe_allow_html=True)
@@ -1066,7 +1063,7 @@ def show_results():
         if tips:
             st.markdown('<div class="section-title">💡 Travel Tips</div>', unsafe_allow_html=True)
             for tip in tips:
-                st.markdown(f'<div class="tip-item">💡 {tip}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="tip-item">💡 {esc(tip)}</div>', unsafe_allow_html=True)
 
     # ── Plan another trip ─────────────────────────────────────────────────────
     st.markdown("<br><br>", unsafe_allow_html=True)
@@ -1119,12 +1116,12 @@ def show_booking():
         flag  = component.get("flag", "warning")
         icon  = FLAG_ICON.get(flag, "⚠️")
         label = FLAG_LABEL.get(flag, flag)
-        status = component.get("status", "")
-        note   = component.get("note", "")
+        status = esc(component.get("status", ""))
+        note   = esc(component.get("note", ""))
         st.markdown(f"""
         <div class="avail-card {flag}">
             <span class="avail-icon">{icon}</span>
-            <div class="avail-title">{title}</div>
+            <div class="avail-title">{esc(title)}</div>
             <div class="avail-status {flag}">{label} — {status}</div>
             <p class="avail-note">{note}</p>
         </div>

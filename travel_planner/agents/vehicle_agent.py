@@ -1,6 +1,8 @@
-from ..llm import create_completion, parse_json
+from .. import guards
+from ..llm import synthesize_json
 from ..models import TripContext
 from ..prompts import VEHICLE_OPTIONS_SCHEMA
+from ..schemas import validate_transport
 from ..search import search as tavily_search
 from .base import BaseAgent
 
@@ -34,13 +36,6 @@ class VehicleAgent(BaseAgent):
             f"for a {duration}-day trip from {starting} to {dest}.\n\n"
             f"Return a JSON object using exactly this structure:\n{VEHICLE_OPTIONS_SCHEMA}"
         )
-        response = create_completion(
-            max_tokens=800,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": "\n\n".join(all_results) + "\n\nReturn the JSON now."},
-            ],
-        )
-        data = parse_json(response.choices[0].message.content) or {}
+        user_content = guards.wrap_untrusted("\n\n".join(all_results)) + "\n\nReturn the JSON now."
+        data = synthesize_json(system, user_content, validate_transport, max_tokens=800) or {}
         return {"options": data.get("options", []), "sources": sources}

@@ -15,9 +15,11 @@ This gives 6–10 cards per state in ~25–30 seconds with 1 LLM call and
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
+from .. import guards
 from ..india_data import STATES
-from ..llm import create_completion, parse_json
+from ..llm import synthesize_json
 from ..models import TripContext
+from ..schemas import validate_suggester
 from ..search import search as tavily_search
 
 _SCHEMA_ITEM = """{
@@ -82,15 +84,10 @@ def suggest(ctx: TripContext) -> List[dict]:
         f'{{"destinations": [ /* one object per place, in the same order */ ]}}'
     )
 
-    response = create_completion(
-        max_tokens=4000,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user",   "content": f"Context from search:\n\n{context}\n\nReturn the JSON now."},
-        ],
+    user_content = (
+        f"Context from search:\n\n{guards.wrap_untrusted(context)}\n\nReturn the JSON now."
     )
-    data = parse_json(response.choices[0].message.content) or {}
+    data = synthesize_json(system, user_content, validate_suggester, max_tokens=4000) or {}
     destinations: List[dict] = data.get("destinations", [])
 
     # Guard: ensure every place from the list has a card (LLM sometimes skips)

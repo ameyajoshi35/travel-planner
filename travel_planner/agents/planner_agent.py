@@ -1,6 +1,8 @@
-from ..llm import create_completion, parse_json
+from .. import guards
+from ..llm import synthesize_json
 from ..models import TripContext
 from ..prompts import PLANNER_JSON_SCHEMA, SUGGESTION_JSON_SCHEMA
+from ..schemas import validate_plan
 from ..search import search as tavily_search
 from .base import BaseAgent
 
@@ -58,14 +60,9 @@ class PlannerAgent(BaseAgent):
             f"Return a JSON object using exactly this structure:\n{schema}"
         )
 
-        response = create_completion(
-            max_tokens=4096,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": f"Search results:\n\n{combined}\n\nProduce the JSON plan now."},
-            ],
+        user_content = (
+            f"Search results:\n\n{guards.wrap_untrusted(combined)}\n\nProduce the JSON plan now."
         )
-        plan = parse_json(response.choices[0].message.content) or {}
+        plan = synthesize_json(system, user_content, validate_plan, max_tokens=4096) or {}
         plan["_sources"] = sources
         return plan

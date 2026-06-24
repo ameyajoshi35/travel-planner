@@ -1,10 +1,11 @@
 import json
 import re
 import time
-from typing import Generator, List, Optional
+from typing import Callable, Generator, List, Optional
 
 from groq import Groq, RateLimitError
 
+from . import guards
 from .models import TripContext
 from .prompts import (
     CONFIRMATION_TEMPLATE,
@@ -49,6 +50,44 @@ def _create(max_tokens: int, messages: list, response_format: Optional[dict] = N
 
 # Public helpers for agents to import
 create_completion = _create
+
+
+def synthesize_json(
+    system: str,
+    user_content: str,
+    validate_fn: Callable,
+    max_tokens: int,
+) -> Optional[dict]:
+    """Hardened LLM call: injection-defense header → JSON mode → schema validate → repair retry."""
+    system = guards.INJECTION_DEFENSE + system
+    messages: List[dict] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_content},
+    ]
+
+    def _call() -> str:
+        return _create(
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+            messages=messages,
+        ).choices[0].message.content
+
+    raw = _call()
+    clean = validate_fn(parse_json(raw))
+    if clean is not None:
+        return clean
+
+    # Repair turn — tell model what went wrong and try once more
+    messages.append({"role": "assistant", "content": raw})
+    messages.append({
+        "role": "user",
+        "content": (
+            "Your previous response was not valid JSON matching the required schema. "
+            "Return ONLY a single valid JSON object matching the schema exactly — "
+            "no prose, no markdown, no code fences."
+        ),
+    })
+    return validate_fn(parse_json(_call()))
 
 
 def parse_json(s: str) -> Optional[dict]:

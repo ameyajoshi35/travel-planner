@@ -15,8 +15,10 @@ Returns a status dict shaped like:
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
-from .llm import create_completion, parse_json
+from . import guards
+from .llm import synthesize_json
 from .models import TripContext
+from .schemas import validate_availability
 from .search import search as tavily_search
 
 _SCHEMA = """{
@@ -145,19 +147,16 @@ def check(
         f"Return exactly this JSON:\n{_SCHEMA}"
     )
 
-    response = create_completion(
-        max_tokens=900,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": f"Live search results:\n\n{search_block}\n\nReturn the JSON now."},
-        ],
+    user_content = (
+        f"Live search results:\n\n{guards.wrap_untrusted(search_block)}\n\nReturn the JSON now."
     )
-    result = parse_json(response.choices[0].message.content) or {
-        "overall": "some_changes",
-        "flight":  {"flag": "warning", "status": "Could not verify",  "note": "Please check manually."},
-        "train":   {"flag": "warning", "status": "Could not verify",  "note": "Please check manually."},
-        "vehicle": {"flag": "warning", "status": "Could not verify",  "note": "Please check manually."},
-        "hotels":  {c: {"flag": "warning", "status": "Could not verify", "note": "Please check manually."} for c in hotel_cities},
-    }
+    result = synthesize_json(system, user_content, validate_availability, max_tokens=900)
+    if result is None:
+        result = {
+            "overall": "some_changes",
+            "flight":  {"flag": "warning", "status": "Could not verify", "note": "Please check manually."},
+            "train":   {"flag": "warning", "status": "Could not verify", "note": "Please check manually."},
+            "vehicle": {"flag": "warning", "status": "Could not verify", "note": "Please check manually."},
+            "hotels":  {c: {"flag": "warning", "status": "Could not verify", "note": "Please check manually."} for c in hotel_cities},
+        }
     return result
