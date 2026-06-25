@@ -10,7 +10,7 @@ from .base import BaseAgent
 class PlannerAgent(BaseAgent):
     """Builds the day-by-day itinerary, destination cards, budget, and tips."""
 
-    def run(self, ctx: TripContext) -> dict:
+    def run(self, ctx: TripContext, previous_feedback: str = "") -> dict:
         dest = ctx.destination or None
         state = ctx.state or None
         month = ctx.travel_month or "the travel season"
@@ -59,6 +59,9 @@ class PlannerAgent(BaseAgent):
             f"Trip details:\n{ctx.to_json()}\n\n"
             f"Return a JSON object using exactly this structure:\n{schema}"
         )
+
+        if previous_feedback:
+            system += f"\n\nPREVIOUS ATTEMPT FEEDBACK — you MUST fix these issues:\n{previous_feedback}"
 
         user_content = (
             f"Search results:\n\n{guards.wrap_untrusted(combined)}\n\nProduce the JSON plan now."
