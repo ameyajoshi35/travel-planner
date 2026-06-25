@@ -813,7 +813,20 @@ def show_results():
             <p>We'll do a live availability check, then walk you through booking everything — flights, trains, hotels and vehicles — in one go.</p>
         </div>
         """, unsafe_allow_html=True)
-        _, cta_col, _ = st.columns([1, 2, 1])
+        if st.session_state.get("suggestions"):
+            back_col, cta_col = st.columns([1, 2])
+        else:
+            _, cta_col, _ = st.columns([1, 2, 1])
+            back_col = None
+
+        if back_col:
+            with back_col:
+                if st.button("← Choose another destination", use_container_width=True):
+                    for k in ["plan", "all_images", "by_dest", "hotels_by_location",
+                              "sources", "transport", "availability", "booking_confirmed"]:
+                        st.session_state.pop(k, None)
+                    st.session_state.page = "suggestions"
+                    st.rerun()
         with cta_col:
             if st.button("🔒 Book Complete Package", use_container_width=True, type="primary"):
                 st.session_state.pop("availability", None)
