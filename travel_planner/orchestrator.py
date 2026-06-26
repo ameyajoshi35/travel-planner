@@ -11,11 +11,14 @@ Graph topology:
   reflect_plan  : LLM critique — checks the plan meets duration, budget, scope, and
                   traveler requirements. If it fails and retries remain, routes back
                   to phase1_agents with the feedback appended to the planner prompt.
-  phase2_hotels : HotelAgent — runs after reflection passes (needs city list).
+  phase2_hotels : HotelAgent (local) or RemoteHotelAgent (A2A) — runs after
+                  reflection passes (needs city list). Set HOTEL_AGENT_URL to
+                  use the standalone A2A service instead of the local agent.
   phase3_images : Tavily image searches for destination photos.
 """
 
 import operator
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Annotated, Generator, List, Optional
 
@@ -26,9 +29,17 @@ from typing_extensions import TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from .agents import FlightAgent, HotelAgent, PlannerAgent, TrainAgent, VehicleAgent
+from .agents.remote_hotel_agent import RemoteHotelAgent
 from .llm import get_llm
 from .models import TripContext
 from .search import search as tavily_search
+
+
+def _get_hotel_agent():
+    """Return RemoteHotelAgent if HOTEL_AGENT_URL is configured, else local HotelAgent."""
+    if os.getenv("HOTEL_AGENT_URL"):
+        return RemoteHotelAgent()
+    return HotelAgent()
 
 MAX_RETRIES = 2
 
@@ -238,7 +249,7 @@ def _phase2_hotels(state: TravelGraphState) -> dict:
 
     step_messages = [f"🏨  Finding hotels in {city}…" for city in dest_names[:3]]
 
-    hotel_result = HotelAgent().run(ctx, dest_names)
+    hotel_result = _get_hotel_agent().run(ctx, dest_names)
     step_messages.append("🏨  Hotel recommendations ready…")
 
     sources = {
