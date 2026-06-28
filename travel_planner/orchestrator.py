@@ -61,6 +61,7 @@ class TravelGraphState(TypedDict):
     retry_count:         int   # how many plan revisions have been attempted
     reflection_ok:       bool  # True once the reflection node approves the plan
     reflection_feedback: str   # critique text passed back to the planner on retry
+    search_contexts:     List[str]  # raw Tavily snippets from the planner (for Ragas)
 
 
 # ── Node 1: parallel agent fan-out ────────────────────────────────────────────
@@ -108,11 +109,12 @@ def _phase1_agents(state: TravelGraphState) -> dict:
 
     plan = results.get("plan", {})
     return {
-        "plan":          plan,
-        "flight":        results.get("flight",  {"options": [], "sources": []}),
-        "train":         results.get("train",   {"options": [], "sources": []}),
-        "vehicle":       results.get("vehicle", {"options": [], "sources": []}),
-        "step_messages": step_messages,
+        "plan":            plan,
+        "flight":          results.get("flight",  {"options": [], "sources": []}),
+        "train":           results.get("train",   {"options": [], "sources": []}),
+        "vehicle":         results.get("vehicle", {"options": [], "sources": []}),
+        "search_contexts": plan.get("_contexts", []),  # raw snippets for Ragas
+        "step_messages":   step_messages,
     }
 
 
@@ -358,6 +360,7 @@ def run(ctx: TripContext, phase: str) -> Generator[dict, None, None]:
         "retry_count":        0,
         "reflection_ok":      False,
         "reflection_feedback": "",
+        "search_contexts":    [],
     }
 
     for event in _graph.stream(initial, stream_mode="updates"):
@@ -373,6 +376,10 @@ def run(ctx: TripContext, phase: str) -> Generator[dict, None, None]:
                     "flight":  update.get("flight",  {"options": [], "sources": []}),
                     "train":   update.get("train",   {"options": [], "sources": []}),
                     "vehicle": update.get("vehicle", {"options": [], "sources": []}),
+                }
+                yield {
+                    "type":     "contexts",
+                    "contexts": update.get("search_contexts", []),
                 }
 
             elif node_name == "phase2_hotels":

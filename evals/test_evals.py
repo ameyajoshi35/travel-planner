@@ -25,6 +25,7 @@ from evals.eval_fns import (
     run_all,
 )
 from evals.fixtures import PLANS, TRIPS
+from evals.ragas_eval import ctx_to_query, plan_to_text, run_ragas
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -264,3 +265,63 @@ class TestPipelineOutputs:
         report = run_all(plan, ctx)
         score = report["overall_score"]
         assert score >= 0.7, f"Overall score {score:.2f} below threshold. Results: {report['results']}"
+
+
+@pytest.mark.pipeline
+class TestRagasObservability:
+    """
+    Ragas faithfulness eval — measures whether the generated plan is grounded
+    in the Tavily search results that produced it.
+
+    Requires --run-pipeline + GROQ_API_KEY + TAVILY_API_KEY + ragas installed.
+    Each test takes ~90–120 s (pipeline run + Ragas LLM evaluation).
+    """
+
+    def test_rajasthan_faithfulness(self, run_pipeline):
+        _requires_pipeline(run_pipeline)
+        from travel_planner.orchestrator import run as orch_run
+
+        ctx      = TRIPS["rajasthan_couple"]
+        plan     = None
+        contexts = []
+
+        for event in orch_run(ctx, "planning"):
+            if event["type"] == "plan":
+                plan = event["data"]
+            if event["type"] == "contexts":
+                contexts = event["contexts"]
+
+        assert plan is not None, "Orchestrator yielded no plan"
+        assert contexts,         "No search contexts captured — check _contexts key in PlannerAgent"
+
+        scores = run_ragas(ctx, plan, contexts)
+        assert not scores["errors"], f"Ragas errors: {scores['errors']}"
+        assert scores["faithfulness"] is not None
+        assert scores["faithfulness"] >= 0.5, (
+            f"Faithfulness {scores['faithfulness']:.2f} below 0.5 — "
+            "plan may be hallucinating destinations or activities"
+        )
+
+    def test_himachal_faithfulness(self, run_pipeline):
+        _requires_pipeline(run_pipeline)
+        from travel_planner.orchestrator import run as orch_run
+
+        ctx      = TRIPS["himachal_friends"]
+        plan     = None
+        contexts = []
+
+        for event in orch_run(ctx, "planning"):
+            if event["type"] == "plan":
+                plan = event["data"]
+            if event["type"] == "contexts":
+                contexts = event["contexts"]
+
+        assert plan is not None, "Orchestrator yielded no plan"
+        scores = run_ragas(ctx, plan, contexts)
+        assert not scores["errors"], f"Ragas errors: {scores['errors']}"
+        assert scores["faithfulness"] is not None
+        # Log score even if below threshold — useful for debugging
+        print(f"\nHimachal faithfulness: {scores['faithfulness']:.2f}")
+        assert scores["faithfulness"] >= 0.5, (
+            f"Faithfulness {scores['faithfulness']:.2f} below threshold"
+        )

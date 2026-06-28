@@ -67,5 +67,6 @@ class PlannerAgent(BaseAgent):
             f"Search results:\n\n{guards.wrap_untrusted(combined)}\n\nProduce the JSON plan now."
         )
         plan = synthesize_json(system, user_content, validate_plan, max_tokens=4096) or {}
-        plan["_sources"] = sources
+        plan["_sources"]   = sources
+        plan["_contexts"]  = all_results   # raw snippets for Ragas faithfulness eval
         return plan
